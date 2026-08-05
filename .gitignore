@@ -1,0 +1,11 @@
+.idea/
+__pycache__/
+*.pyc
+.venv/
+venv/
+data/raw_videos/
+frames/
+outputs/annotated_frames/
+*.mp4
+*.avi
+outputs/*.csv
