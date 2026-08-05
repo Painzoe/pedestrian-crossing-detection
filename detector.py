@@ -1,43 +1,37 @@
 """
-detector.py
-------------
-Bu script'in amaci: YOLOv8 modelini kullanarak TEK BIR fotografta
-insan (person) tespiti yapmak ve sonucu gorsellestirmek.
+detect_all_frames.py
+---------------------
+frames klasorundeki TUM fotograflari tek tek tarar, her birinde YOLO ile
+person tespiti yapar, sonucu:
+  1) kutulu (annotated) resim olarak diske kaydeder
+  2) bir CSV dosyasina (frame adi, tespit edilen kisi sayisi) yazar
 
-Bu, projenin ilk test adimi - henuz ROI, sayim, takip yok.
-Sadece "model dogru sekilde insanlari buluyor mu?" sorusuna cevap ariyoruz.
+Bu adim hala "tek frame" mantiginin devami - henuz takip (tracking) veya
+sayim (ROI gecisi) yok. Sadece modelin butun videoda tutarli calisip
+calismadigini gormek icin.
 """
 
-from ultralytics import YOLO   # YOLO modelini yuklemek ve calistirmak icin
-import cv2                      # Goruntu okuma, cizim ve kaydetme icin (OpenCV)
-import os                       # Dosya yolu islemleri icin
+from ultralytics import YOLO
+import cv2
+import os
+import pandas as pd
 
 # ============================================================
-# 1) AYARLAR (buralari kendi ortamina gore degistirebilirsin)
+# 1) AYARLAR
 # ============================================================
 
-# Test etmek istedigin fotografin tam yolu.
-# Simdilik frames klasorundeki ilk kareyi kullaniyoruz.
-INPUT_IMAGE_PATH = "/home/painzoe/PycharmProjects/pedestrian-crossing-detection/frames/frame_0000.jpg"
+# Frame'lerin bulundugu klasor
+FRAMES_DIR = "/home/painzoe/PycharmProjects/pedestrian-crossing-detection/frames"
 
-# Sonucu (kutulu goruntuyu) nereye kaydedecegimiz.
-OUTPUT_IMAGE_PATH = "/home/painzoe/PycharmProjects/pedestrian-crossing-detection/outputs/detector_test_result.jpg"
+# Kutulu (annotated) resimlerin kaydedilecegi klasor
+ANNOTATED_OUTPUT_DIR = "/home/painzoe/PycharmProjects/pedestrian-crossing-detection/outputs/annotated_frames"
 
-# YOLO modeli - "yolov8n.pt" = "nano" versiyon, yani en kucuk ve en hizli model.
-# Ilk calistirmada bu dosya otomatik olarak internetten indirilecek (~6 MB).
-# Dogruluk/hiz dengesini ileride yolov8s.pt veya yolov8m.pt ile degistirebiliriz.
-MODEL_NAME = "yolov8n.pt"
+# Ozet sonuclarin yazilacagi CSV dosyasi
+CSV_OUTPUT_PATH = "/home/painzoe/PycharmProjects/pedestrian-crossing-detection/outputs/detection_summary.csv"
 
-# COCO veri setinde "person" sinifinin ID'si 0'dir.
-# Bu degeri filtre olarak verecegiz, boylece model sadece insanlari arayacak
-# (araba, bisiklet vs. diger 79 sinifi gormezden gelecek).
+MODEL_NAME = "yolov8x.pt"
 PERSON_CLASS_ID = 0
-
-# Tespitin "guvenilir" sayilmasi icin gereken minimum dogruluk orani (0-1 arasi).
-# 0.5 = model yuzde 50'den fazla eminse o tespiti kabul et.
-# Bu degeri sonra ihtiyaca gore ayarlayacagiz (cok dusukse yanlis tespitler artar,
-# cok yuksekse gercek insanlari kacirabiliriz).
-CONFIDENCE_THRESHOLD = 0.5
+CONFIDENCE_THRESHOLD = 0.15
 
 
 # ============================================================
@@ -46,67 +40,89 @@ CONFIDENCE_THRESHOLD = 0.5
 
 print(f"Model yukleniyor: {MODEL_NAME}")
 model = YOLO(MODEL_NAME)
-# Not: Bu satir calisinca terminalde indirme ilerlemesi gorebilirsin (ilk seferde).
 
 
 # ============================================================
-# 3) FOTOGRAFI OKU
+# 3) FRAME LISTESINI HAZIRLA
 # ============================================================
 
-# Fotografin gercekten var olup olmadigini kontrol ediyoruz.
-# Yanlis yol yazdiysak, YOLO'ya bos/hatali veri gondermek yerine
-# burada anlasilir bir hata mesaji verip duruyoruz.
-if not os.path.exists(INPUT_IMAGE_PATH):
-    raise FileNotFoundError(f"Fotograf bulunamadi: {INPUT_IMAGE_PATH}")
+# Klasordeki tum dosyalari listele, sadece .jpg / .jpeg / .png uzantililari al
+all_files = os.listdir(FRAMES_DIR)
+frame_files = sorted([
+    f for f in all_files
+    if f.lower().endswith((".jpg", ".jpeg", ".png"))
+])
+# sorted() kullaniyoruz cunku frame_0000, frame_0001, frame_0002... seklinde
+# isimlendirilmis dosyalarin ZAMAN SIRASINA gore islenmesini istiyoruz.
+# Isletim sistemi klasoru varsayilan olarak bu sirayla listelemeyebilir.
 
-# cv2.imread ile fotografi bir "matris" (piksel dizisi) olarak bellege okuyoruz.
-image = cv2.imread(INPUT_IMAGE_PATH)
-print(f"Fotograf okundu. Boyut: {image.shape[1]}x{image.shape[0]} piksel")
-# image.shape -> (yukseklik, genislik, renk_kanali_sayisi) doner
-# ornek: (1080, 1920, 3) -> 1920x1080, RGB (3 kanal)
+if len(frame_files) == 0:
+    raise FileNotFoundError(f"'{FRAMES_DIR}' klasorunde hic fotograf bulunamadi.")
 
+print(f"Toplam {len(frame_files)} frame bulundu. Tarama basliyor...\n")
 
-# ============================================================
-# 4) TESPIT (DETECTION) CALISTIR
-# ============================================================
-
-# model() fonksiyonu fotografi YOLO'ya verir ve sonuc doner.
-# classes=[PERSON_CLASS_ID] -> sadece insan sinifini ara demek
-# conf=CONFIDENCE_THRESHOLD -> bu esigin altindaki tespitleri otomatik ele
-results = model(image, classes=[PERSON_CLASS_ID], conf=CONFIDENCE_THRESHOLD)
-
-# results bir liste doner (birden fazla fotograf verirsek her biri icin 1 eleman).
-# Biz tek fotograf verdigimiz icin sadece ilk elemani (results[0]) kullaniyoruz.
-result = results[0]
-
-# Kac tane insan bulundu?
-detected_boxes = result.boxes  # Bulunan tum kutularin (bounding box) listesi
-num_people = len(detected_boxes)
-print(f"Tespit edilen insan sayisi: {num_people}")
+# Kutulu resimlerin kaydedilecegi klasoru olustur (yoksa)
+os.makedirs(ANNOTATED_OUTPUT_DIR, exist_ok=True)
 
 
 # ============================================================
-# 5) SONUCLARI GORSELLESTIR VE KAYDET
+# 4) HER FRAME ICIN TESPIT CALISTIR (ANA DONGU)
 # ============================================================
 
-# Her bir tespit icin detayli bilgi yazdiralim (ogrenme amacli)
-for i, box in enumerate(detected_boxes):
-    # box.xyxy -> [x_min, y_min, x_max, y_max] formatinda koordinatlar
-    x_min, y_min, x_max, y_max = box.xyxy[0].tolist()
-    confidence = box.conf[0].item()  # bu tespitin guven skoru (0-1 arasi)
+# Sonuclari biriktirecegimiz liste - dongu bitince bunu CSV'ye donusturecegiz.
+# Her frame icin bir "sozluk" (dictionary) ekleyecegiz: {"frame": ..., "person_count": ...}
+results_summary = []
 
-    print(f"  Kisi {i + 1}: Guven={confidence:.2f}, "
-          f"Konum=({x_min:.0f}, {y_min:.0f}) - ({x_max:.0f}, {y_max:.0f})")
+for frame_name in frame_files:
+    # Klasor yolu + dosya adini birlestirip tam yolu olusturuyoruz
+    frame_path = os.path.join(FRAMES_DIR, frame_name)
 
-# result.plot() -> YOLO'nun kendi cizim fonksiyonu.
-# Bulunan tum kutulari, guven skorlarini fotografin uzerine otomatik cizer.
-annotated_image = result.plot()
+    # Fotografi oku
+    image = cv2.imread(frame_path)
+    if image is None:
+        # Bazen dosya bozuk olabilir; bu durumda hata verip durmak yerine
+        # sadece uyari basip bir sonraki frame'e geciyoruz.
+        print(f"  [UYARI] '{frame_name}' okunamadi, atlaniyor.")
+        continue
 
-# Cikti klasoru yoksa olustur (ilk calistirmada hata almamak icin)
-output_dir = os.path.dirname(OUTPUT_IMAGE_PATH)
-os.makedirs(output_dir, exist_ok=True)
+    # Tespit calistir. verbose=False -> Ultralytics'in her frame icin
+    # terminale bastigi uzun teknik log satirlarini susturuyoruz,
+    # kendi kisa ozetimizi biz yazdiriyoruz.
+    results = model(image, classes=[PERSON_CLASS_ID], conf=CONFIDENCE_THRESHOLD, imgsz=1280, verbose=False)
+    result = results[0]
+    num_people = len(result.boxes)
 
-# Sonucu diske kaydet
-cv2.imwrite(OUTPUT_IMAGE_PATH, annotated_image)
-print(f"\nSonuc kaydedildi: {OUTPUT_IMAGE_PATH}")
-print("Bu dosyayi acip kutularin dogru insanlari cevreledigini kontrol et.")
+    # Terminale kisa ozet yaz (ilerlemeyi takip edebilmen icin)
+    print(f"  {frame_name}: {num_people} kisi tespit edildi")
+
+    # Kutulu resmi olustur ve diske kaydet (dosya adi orijinaliyle ayni kalsin)
+    annotated_image = result.plot()
+    output_path = os.path.join(ANNOTATED_OUTPUT_DIR, frame_name)
+    cv2.imwrite(output_path, annotated_image)
+
+    # Bu frame'in sonucunu listeye ekle
+    results_summary.append({
+        "frame": frame_name,
+        "person_count": num_people
+    })
+
+
+# ============================================================
+# 5) CSV OLARAK KAYDET
+# ============================================================
+
+# Liste halindeki sonuclari bir pandas DataFrame'e (yani bir tabloya) donusturuyoruz.
+# Her satir bir frame, sutunlar "frame" ve "person_count" olacak.
+summary_df = pd.DataFrame(results_summary)
+
+# CSV dosyasina yaz. index=False -> pandas'in kendi ekledigi satir numaralarini
+# (0, 1, 2, ...) dosyaya yazmasin, cunku bize gerekli degil.
+summary_df.to_csv(CSV_OUTPUT_PATH, index=False)
+
+print(f"\nTum frame'ler tarandi.")
+print(f"Kutulu resimler: {ANNOTATED_OUTPUT_DIR}")
+print(f"Ozet CSV: {CSV_OUTPUT_PATH}")
+
+# Hizli bir saglama/ozet - kac kisi ortalama gorunuyor, en kalabalik frame kac kisi
+print(f"\nOrtalama kisi sayisi: {summary_df['person_count'].mean():.2f}")
+print(f"Maksimum kisi sayisi (tek frame'de): {summary_df['person_count'].max()}")
