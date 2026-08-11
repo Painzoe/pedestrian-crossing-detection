@@ -8,3 +8,18 @@ data/raw_videos/
 *.avi
 
 *.pt
+*.pth
+*.ckpt
+
+# eski/kirik venv yedegi (artik kullanilmiyor, 8.9GB)
+.venv_broken_python313_backup/
+
+# turetilmis/tekrar-uretilebilir buyuk veri klasorleri (kod ile
+# yeniden olusturulabilir: extract_frames.py, prepare_dataset.py,
+# prepare_dataset_rfdetr.py) - git'e gereksiz agirlik katmasin
+data/dataset_frames/
+data/coco_dataset/
+data/yolo_dataset/
+outputs/roi_frames/
+outputs/roi_frames2/
+outputs/tracked_frames/

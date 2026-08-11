@@ -1,128 +1,144 @@
 """
-detect_all_frames.py
----------------------
-frames klasorundeki TUM fotograflari tek tek tarar, her birinde YOLO ile
-person tespiti yapar, sonucu:
-  1) kutulu (annotated) resim olarak diske kaydeder
-  2) bir CSV dosyasina (frame adi, tespit edilen kisi sayisi) yazar
+detector.py
+------------
+Bir VIDEO dosyasi uzerinde kare kare YOLO ile kisi tespiti yapar, her
+karede tespit edilen kisilerin etrafina kutu cizip, TUM kareleri
+OpenCV VideoWriter ile birlestirerek kutulu/izlenebilir bir MP4 video
+dosyasi uretir.
 
-Bu adim hala "tek frame" mantiginin devami - henuz takip (tracking) veya
-sayim (ROI gecisi) yok. Sadece modelin butun videoda tutarli calisip
-calismadigini gormek icin.
+ONCEKI VERSIYONDAN FARKI: Eskiden frames/ klasorundeki ayri ayri resim
+dosyalarini okuyup, ayri ayri kutulu resimler + bir CSV ozet
+uretiyordu. ARTIK dogrudan bir video dosyasi okuyup, dogrudan bir
+video dosyasi yaziyoruz - resimlere bolme islemi SADECE Label Studio'ya
+etiketleme hazirligi icin extract_frames.py'de kaliyor, tespit/tracking
+adimlarinda artik kullanilmiyor.
+
+Video dosya yolu SABIT KODLANMIS DEGIL - komut satirindan parametre
+olarak veriliyor, boylece ayni script'i farkli videolarla
+calistirabiliyoruz (orn. farklı Label Studio partlari, ham videolar).
+
+KULLANIM:
+  python detector.py <video_yolu> [--model MODEL_YOLU] [--output CIKTI_YOLU]
+                      [--conf ESIK] [--imgsz BOYUT]
+
+ORNEK (fine-tune edilmis modelle, part_1'in kaynak videosunda test):
+  python detector.py data/raw_videos/part_1.mp4 \\
+      --model outputs/train_runs/part1_pilot_yolov8x-2/weights/best.pt
 """
 
 from ultralytics import YOLO
 import cv2
 import os
-import pandas as pd
+import argparse
 
-# ============================================================
-# 1) AYARLAR
-# ============================================================
+BASE_DIR = "/home/painzoe/PycharmProjects/pedestrian-crossing-detection"
 
-# Frame'lerin bulundugu klasor
-FRAMES_DIR = "/home/painzoe/PycharmProjects/pedestrian-crossing-detection/frames"
-
-# Kutulu (annotated) resimlerin kaydedilecegi klasor
-ANNOTATED_OUTPUT_DIR = "/home/painzoe/PycharmProjects/pedestrian-crossing-detection/outputs/annotated_frames"
-
-# Ozet sonuclarin yazilacagi CSV dosyasi
-CSV_OUTPUT_PATH = "/home/painzoe/PycharmProjects/pedestrian-crossing-detection/outputs/detection_summary.csv"
-
-MODEL_NAME = "yolov8x.pt"
+# --- Komut satirinda belirtilmezse kullanilacak varsayilan degerler ---
+DEFAULT_MODEL = "yolov8x.pt"
 PERSON_CLASS_ID = 0
+# NOT: 0.15, bu tarz dusuk cozunurluklu/tepeden acili/golgeli kameralar
+# icin test edilerek dogrulanmis deger (roi.py'de de ayni deger kullaniliyor).
 CONFIDENCE_THRESHOLD = 0.15
+IMG_SIZE = 1280
 
 
-# ============================================================
-# 2) MODELI YUKLE
-# ============================================================
-
-print(f"Model yukleniyor: {MODEL_NAME}")
-model = YOLO(MODEL_NAME)
-
-
-# ============================================================
-# 3) FRAME LISTESINI HAZIRLA
-# ============================================================
-
-# Klasordeki tum dosyalari listele, sadece .jpg / .jpeg / .png uzantililari al
-all_files = os.listdir(FRAMES_DIR)
-frame_files = sorted([
-    f for f in all_files
-    if f.lower().endswith((".jpg", ".jpeg", ".png"))
-])
-# sorted() kullaniyoruz cunku frame_0000, frame_0001, frame_0002... seklinde
-# isimlendirilmis dosyalarin ZAMAN SIRASINA gore islenmesini istiyoruz.
-# Isletim sistemi klasoru varsayilan olarak bu sirayla listelemeyebilir.
-
-if len(frame_files) == 0:
-    raise FileNotFoundError(f"'{FRAMES_DIR}' klasorunde hic fotograf bulunamadi.")
-
-print(f"Toplam {len(frame_files)} frame bulundu. Tarama basliyor...\n")
-
-# Kutulu resimlerin kaydedilecegi klasoru olustur (yoksa)
-os.makedirs(ANNOTATED_OUTPUT_DIR, exist_ok=True)
+def parse_args():
+    """Komut satirindan video yolunu ve istege bagli ayarlari okur.
+    argparse kullaniyoruz ki script'i HER SEFERINDE FARKLI bir video/
+    model ile calistirabilelim - kodun icini degistirmeden."""
+    parser = argparse.ArgumentParser(
+        description="Bir video uzerinde YOLO ile kisi tespiti yapip kutulu video uretir."
+    )
+    parser.add_argument("video_path", help="Girdi video dosyasinin yolu (orn. data/raw_videos/part_1.mp4)")
+    parser.add_argument("--model", default=DEFAULT_MODEL,
+                         help=f"Kullanilacak YOLO agirlik dosyasi (varsayilan: {DEFAULT_MODEL})")
+    parser.add_argument("--output", default=None,
+                         help="Cikti video yolu (belirtilmezse outputs/detected_videos/ altina otomatik uretilir)")
+    parser.add_argument("--conf", type=float, default=CONFIDENCE_THRESHOLD,
+                         help=f"Guven esigi (varsayilan: {CONFIDENCE_THRESHOLD})")
+    parser.add_argument("--imgsz", type=int, default=IMG_SIZE,
+                         help=f"Tespit icin goruntu boyutu (varsayilan: {IMG_SIZE})")
+    return parser.parse_args()
 
 
-# ============================================================
-# 4) HER FRAME ICIN TESPIT CALISTIR (ANA DONGU)
-# ============================================================
+def main():
+    args = parse_args()
 
-# Sonuclari biriktirecegimiz liste - dongu bitince bunu CSV'ye donusturecegiz.
-# Her frame icin bir "sozluk" (dictionary) ekleyecegiz: {"frame": ..., "person_count": ...}
-results_summary = []
+    if not os.path.exists(args.video_path):
+        raise FileNotFoundError(f"Video bulunamadi: {args.video_path}")
 
-for frame_name in frame_files:
-    # Klasor yolu + dosya adini birlestirip tam yolu olusturuyoruz
-    frame_path = os.path.join(FRAMES_DIR, frame_name)
+    # Cikti yolu belirtilmediyse: dosya adindan otomatik uret.
+    if args.output:
+        output_path = args.output
+    else:
+        video_basename = os.path.splitext(os.path.basename(args.video_path))[0]
+        output_dir = os.path.join(BASE_DIR, "outputs", "detected_videos")
+        os.makedirs(output_dir, exist_ok=True)
+        output_path = os.path.join(output_dir, f"{video_basename}_detected.mp4")
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
-    # Fotografi oku
-    image = cv2.imread(frame_path)
-    if image is None:
-        # Bazen dosya bozuk olabilir; bu durumda hata verip durmak yerine
-        # sadece uyari basip bir sonraki frame'e geciyoruz.
-        print(f"  [UYARI] '{frame_name}' okunamadi, atlaniyor.")
-        continue
+    print(f"Model yukleniyor: {args.model}")
+    model = YOLO(args.model)
 
-    # Tespit calistir. verbose=False -> Ultralytics'in her frame icin
-    # terminale bastigi uzun teknik log satirlarini susturuyoruz,
-    # kendi kisa ozetimizi biz yazdiriyoruz.
-    results = model(image, classes=[PERSON_CLASS_ID], conf=CONFIDENCE_THRESHOLD, imgsz=1280, verbose=False)
-    result = results[0]
-    num_people = len(result.boxes)
+    # ============================================================
+    # GIRDI VIDEOYU AC, OZELLIKLERINI (fps, cozunurluk) OKU
+    # ============================================================
+    cap = cv2.VideoCapture(args.video_path)
+    if not cap.isOpened():
+        raise RuntimeError(f"Video acilamadi: {args.video_path}")
 
-    # Terminale kisa ozet yaz (ilerlemeyi takip edebilmen icin)
-    print(f"  {frame_name}: {num_people} kisi tespit edildi")
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    if fps <= 0:
+        # Bazi bozuk/eksik videolarda fps bilgisi okunamayabilir.
+        fps = 30.0
+        print("[UYARI] Video fps bilgisi okunamadi, 30 varsayiliyor.")
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-    # Kutulu resmi olustur ve diske kaydet (dosya adi orijinaliyle ayni kalsin)
-    annotated_image = result.plot()
-    output_path = os.path.join(ANNOTATED_OUTPUT_DIR, frame_name)
-    cv2.imwrite(output_path, annotated_image)
+    print(f"Girdi video: {width}x{height}, {fps:.2f} fps, ~{total_frames} kare")
 
-    # Bu frame'in sonucunu listeye ekle
-    results_summary.append({
-        "frame": frame_name,
-        "person_count": num_people
-    })
+    # ============================================================
+    # CIKTI VIDEO YAZICIYI HAZIRLA - GIRDI ILE AYNI fps/cozunurluk,
+    # boylece cikti video DOGAL HIZINDA oynar (hizlandirilmis/
+    # yavaslatilmis gorunmez).
+    # ============================================================
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # yaygin/uyumlu bir MP4 codec kodu
+    writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+
+    # ============================================================
+    # KARE KARE TESPIT YAP, KUTULARI CIZ, CIKTI VIDEOYA YAZ
+    # ============================================================
+    frame_index = 0
+    total_detections = 0
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:  # video bitti
+            break
+
+        results = model(frame, classes=[PERSON_CLASS_ID], conf=args.conf,
+                         imgsz=args.imgsz, verbose=False)
+        # result.plot() -> YOLO'nun kendi cizdigi kutu + etiket + guven skoru
+        annotated_frame = results[0].plot()
+        person_count = len(results[0].boxes)
+        total_detections += person_count
+
+        writer.write(annotated_frame)
+
+        frame_index += 1
+        # Her karede degil, 30 karede bir (ve son karede) ilerleme yazdir -
+        # binlerce kareli bir videoda terminali bogmamak icin.
+        if frame_index % 30 == 0 or frame_index == total_frames:
+            print(f"  {frame_index}/{total_frames} kare islendi (bu karede {person_count} kisi)")
+
+    cap.release()
+    writer.release()
+
+    print(f"\nTamamlandi: {frame_index} kare islendi.")
+    print(f"Ortalama kisi/kare: {total_detections / max(frame_index, 1):.2f}")
+    print(f"Cikti video: {output_path}")
 
 
-# ============================================================
-# 5) CSV OLARAK KAYDET
-# ============================================================
-
-# Liste halindeki sonuclari bir pandas DataFrame'e (yani bir tabloya) donusturuyoruz.
-# Her satir bir frame, sutunlar "frame" ve "person_count" olacak.
-summary_df = pd.DataFrame(results_summary)
-
-# CSV dosyasina yaz. index=False -> pandas'in kendi ekledigi satir numaralarini
-# (0, 1, 2, ...) dosyaya yazmasin, cunku bize gerekli degil.
-summary_df.to_csv(CSV_OUTPUT_PATH, index=False)
-
-print(f"\nTum frame'ler tarandi.")
-print(f"Kutulu resimler: {ANNOTATED_OUTPUT_DIR}")
-print(f"Ozet CSV: {CSV_OUTPUT_PATH}")
-
-# Hizli bir saglama/ozet - kac kisi ortalama gorunuyor, en kalabalik frame kac kisi
-print(f"\nOrtalama kisi sayisi: {summary_df['person_count'].mean():.2f}")
-print(f"Maksimum kisi sayisi (tek frame'de): {summary_df['person_count'].max()}")
+if __name__ == "__main__":
+    main()

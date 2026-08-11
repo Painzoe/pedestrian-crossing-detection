@@ -1,0 +1,16 @@
+# data.yaml
+# ----------
+# Ultralytics YOLO egitiminin veri setini bulmasi icin kullandigi
+# konfigurasyon dosyasi. prepare_dataset.py'nin urettigi
+# data/yolo_dataset/ klasor yapisina isaret ediyor.
+#
+# NOT: train.py bu dosyayi calisirken oldugu klasorden (proje kok
+# dizini) okuyacagi icin train/val yollari BASE_DIR'e gore verildi.
+
+path: /home/painzoe/PycharmProjects/pedestrian-crossing-detection/data/yolo_dataset
+train: train/images
+val: val/images
+
+# Sinif sayisi (nc) ve isimleri - tek sinifimiz "person", ID 0.
+nc: 1
+names: ['person']
