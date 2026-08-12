@@ -36,17 +36,21 @@ def load_rfdetr_map(csv_path):
 def plot_map_comparison():
     yolo25_e, yolo25_v = load_yolo_map(os.path.join(BASE_DIR, "outputs/models/yolov8x_part1_finetune/training/results.csv"))
     yolo50_e, yolo50_v = load_yolo_map(os.path.join(BASE_DIR, "outputs/models/yolov8x_part1_finetune_50ep/training/results.csv"))
+    yolo26_e, yolo26_v = load_yolo_map(os.path.join(BASE_DIR, "outputs/models/yolo26x_part1_finetune/training/results.csv"))
+    yolo26_50_e, yolo26_50_v = load_yolo_map(os.path.join(BASE_DIR, "outputs/models/yolo26x_part1_finetune_50ep/training/results.csv"))
     rf25_e, rf25_v = load_rfdetr_map(os.path.join(BASE_DIR, "outputs/models/rfdetr_part1_finetune/training/metrics.csv"))
     rf50_e, rf50_v = load_rfdetr_map(os.path.join(BASE_DIR, "outputs/models/rfdetr_part1_finetune_50ep/training/metrics.csv"))
 
     fig, ax = plt.subplots(figsize=(10, 6))
-    ax.plot(yolo25_e, yolo25_v, label="YOLO 25 epoch", color="tab:blue", linestyle="--", marker="o", markersize=3)
-    ax.plot(yolo50_e, yolo50_v, label="YOLO 50 epoch", color="tab:blue", linestyle="-", marker="o", markersize=3)
+    ax.plot(yolo25_e, yolo25_v, label="YOLOv8x 25 epoch", color="tab:blue", linestyle="--", marker="o", markersize=3)
+    ax.plot(yolo50_e, yolo50_v, label="YOLOv8x 50 epoch", color="tab:blue", linestyle="-", marker="o", markersize=3)
+    ax.plot(yolo26_e, yolo26_v, label="YOLO26x 25 epoch", color="tab:green", linestyle="--", marker="^", markersize=3)
+    ax.plot(yolo26_50_e, yolo26_50_v, label="YOLO26x 50 epoch", color="tab:green", linestyle="-", marker="^", markersize=3)
     ax.plot(rf25_e, rf25_v, label="RF-DETR 25 epoch", color="tab:orange", linestyle="--", marker="s", markersize=3)
     ax.plot(rf50_e, rf50_v, label="RF-DETR 50 epoch", color="tab:orange", linestyle="-", marker="s", markersize=3)
     ax.set_xlabel("Epoch")
     ax.set_ylabel("mAP50-95 (part_1'in KENDI validation setinde)")
-    ax.set_title("4 modelin egitim egrisi - part_1 validation seti\n(Bu grafik hicbirinin Video1.mp4'teki overfitting sorununu GOSTERMIYOR - bkz. 2. grafik)")
+    ax.set_title("Modellerin egitim egrisi - part_1 validation seti\n(Bu grafik hicbirinin Video1.mp4'teki overfitting/genelleme sorununu GOSTERMIYOR - bkz. 2. grafik)")
     ax.legend()
     ax.grid(alpha=0.3)
     fig.tight_layout()
@@ -60,24 +64,24 @@ def plot_video_comparison():
     # Elle topladigimiz (video testlerinden) ortalama kisi/kare degerleri.
     data = {
         "Video1.mp4\n(hedef kamera,\nhic gormedi)": {
-            "YOLO 25ep": 1.22, "YOLO 50ep": 36.24,
+            "YOLOv8x 25ep": 1.22, "YOLOv8x 50ep": 36.24, "YOLO26x 25ep": 0.32, "YOLO26x 50ep": 1.35,
             "RF-DETR 25ep": 2.14, "RF-DETR 50ep": 2.00,
         },
         "video01.mp4\n(hic gormedi)": {
-            "YOLO 25ep": 5.90, "YOLO 50ep": 7.84,
+            "YOLOv8x 25ep": 5.90, "YOLOv8x 50ep": 7.84, "YOLO26x 25ep": 7.61, "YOLO26x 50ep": 9.44,
             "RF-DETR 25ep": 11.84, "RF-DETR 50ep": 12.05,
         },
         "part_1.mp4\n(kendi verisi)": {
-            "YOLO 25ep": 11.63, "YOLO 50ep": 20.60,
+            "YOLOv8x 25ep": 11.63, "YOLOv8x 50ep": 20.60, "YOLO26x 25ep": 18.39, "YOLO26x 50ep": 23.52,
             "RF-DETR 25ep": 9.82, "RF-DETR 50ep": 10.32,
         },
     }
 
     videos = list(data.keys())
-    models = ["YOLO 25ep", "YOLO 50ep", "RF-DETR 25ep", "RF-DETR 50ep"]
-    colors = ["#7fb3ff", "#0d47ff", "#ffc27f", "#ff7f0e"]
+    models = ["YOLOv8x 25ep", "YOLOv8x 50ep", "YOLO26x 25ep", "YOLO26x 50ep", "RF-DETR 25ep", "RF-DETR 50ep"]
+    colors = ["#7fb3ff", "#0d47ff", "#8fd48f", "#2ca02c", "#ffc27f", "#ff7f0e"]
 
-    fig, axes = plt.subplots(1, 3, figsize=(16, 5.5))
+    fig, axes = plt.subplots(1, 3, figsize=(20, 5.5))
     for ax, video in zip(axes, videos):
         values = [data[video][m] for m in models]
         bars = ax.bar(models, values, color=colors)
@@ -88,8 +92,8 @@ def plot_video_comparison():
             ax.text(bar.get_x() + bar.get_width() / 2, v, f"{v:.1f}",
                     ha="center", va="bottom", fontsize=9)
 
-    fig.suptitle("Video testlerinde ortalama kisi/kare - 4 model kiyaslamasi\n"
-                 "(YOLO 50ep'teki Video1.mp4 sicramasi = overfitting, gercek insan degil)", fontsize=12)
+    fig.suptitle("Video testlerinde ortalama kisi/kare - model kiyaslamasi\n"
+                 "(YOLOv8x 50ep'teki Video1.mp4 sicramasi = overfitting; YOLO26x'teki dusuk deger = kacirma, temizlik degil)", fontsize=12)
     fig.tight_layout()
     out_path = os.path.join(OUT_DIR, "video_test_comparison.png")
     fig.savefig(out_path, dpi=120)
