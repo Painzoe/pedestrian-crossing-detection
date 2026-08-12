@@ -27,10 +27,13 @@ import os
 BASE_DIR = "/home/painzoe/PycharmProjects/pedestrian-crossing-detection"
 
 DATASET_DIR = os.path.join(BASE_DIR, "data", "coco_dataset")
-OUTPUT_DIR = os.path.join(BASE_DIR, "outputs", "models", "rfdetr_part1_finetune", "training")
+# NOT: 25 epoch'luk ilk denemeyi (rfdetr_part1_finetune/) SAKLAMAK
+# istedigimiz icin, 50 epoch'luk yeni deneme AYRI bir klasore
+# (rfdetr_part1_finetune_50ep/) yaziliyor - eskisinin UZERINE YAZMIYOR.
+OUTPUT_DIR = os.path.join(BASE_DIR, "outputs", "models", "rfdetr_part1_finetune_50ep", "training")
 
-# YOLO ile ADIL kiyaslama icin AYNI epoch sayisi (train.py'de EPOCHS = 25).
-EPOCHS = 25
+# YOLO ile ADIL kiyaslama icin AYNI epoch sayisi (train.py'de de EPOCHS = 50).
+EPOCHS = 50
 
 # batch_size="auto" -> RF-DETR'nin kendi "AutoBatch" ozelligi: GPU
 # bellegine (8GB, RTX 4070 Laptop) gore guvenli batch boyutunu KENDISI

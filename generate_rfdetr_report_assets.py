@@ -16,10 +16,13 @@ zaten egitilmis outputs/models/rfdetr_part1_finetune/weights/best.pth
 agirligini kullanir.
 
 KULLANIM:
-  python generate_rfdetr_report_assets.py
+  python generate_rfdetr_report_assets.py [model_klasoru_adi]
+  ornek: python generate_rfdetr_report_assets.py rfdetr_part1_finetune_50ep
+  (belirtilmezse varsayilan "rfdetr_part1_finetune" kullanilir)
 """
 
 import os
+import sys
 import json
 import random
 
@@ -33,7 +36,11 @@ import supervision as sv
 from rfdetr import RFDETRMedium
 
 BASE_DIR = "/home/painzoe/PycharmProjects/pedestrian-crossing-detection"
-MODEL_DIR = os.path.join(BASE_DIR, "outputs", "models", "rfdetr_part1_finetune")
+# Komut satirindan model klasor adi verilebilir - boylece ayni script'i
+# hem 25 epoch'luk hem 50 epoch'luk (ya da ileride baska) RF-DETR
+# denemeleri icin tekrar tekrar kullanabiliyoruz.
+MODEL_FOLDER_NAME = sys.argv[1] if len(sys.argv) > 1 else "rfdetr_part1_finetune"
+MODEL_DIR = os.path.join(BASE_DIR, "outputs", "models", MODEL_FOLDER_NAME)
 TRAINING_DIR = os.path.join(MODEL_DIR, "training")
 WEIGHTS_PATH = os.path.join(MODEL_DIR, "weights", "best.pth")
 

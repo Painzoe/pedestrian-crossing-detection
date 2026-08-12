@@ -24,7 +24,7 @@ BASE_DIR = "/home/painzoe/PycharmProjects/pedestrian-crossing-detection"
 DATA_YAML = os.path.join(BASE_DIR, "data.yaml")
 BASE_MODEL = "yolov8x.pt"
 
-EPOCHS = 25
+EPOCHS = 50
 
 # NOT: ilk denemede IMG_SIZE=1280 (detector.py/roi.py ile ayni) ile
 # CUDA out of memory hatasi aldik - yolov8x (68M parametre) + 1280px,
