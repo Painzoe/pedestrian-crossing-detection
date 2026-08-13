@@ -4,24 +4,31 @@
 
 **Ne eğitildi:** `yolov8x.pt` (COCO üzerinde hazır eğitilmiş model) başlangıç noktası alınarak, `part_1` klasöründeki 300 görselin Label Studio'da elle etiketlenmiş hali (294/300 karede etiket, 6'sında "kimse yok") ile fine-tune edildi.
 
-**Ayarlar:** 25 epoch, imgsz=640 (bkz. not aşağıda), batch=auto, %80 train (240 görsel) / %20 validation (60 görsel).
+---
 
-**NOT (imgsz=640 hakkında):** İlk denemede imgsz=1280 (detector.py/roi.py ile aynı) ile GPU belleği (8GB, RTX 4070 Laptop) yetmemişti (CUDA out of memory). 640, YOLOv8'in standart/varsayılan eğitim çözünürlüğü — bellek ihtiyacını ~4'te 1'e indirdi, kartta rahat çalıştı. Eğitim çözünürlüğünün inference (detector.py/roi.py, 1280) ile birebir aynı olması şart değil.
+## 1. Ayarlar / Configuration
+
+| Ayar | Değer |
+|---|---|
+| Base model | `yolov8x.pt` (COCO ön-eğitimli) |
+| Epoch | 25 |
+| Batch size | **16** (AutoBatch, `batch=-1`) — bkz. not aşağıda |
+| imgsz | 640 |
+| Optimizer | `auto` (Ultralytics kendi seçti) |
+| lr0 / lrf | 0.01 / 0.01 |
+| momentum | 0.937 |
+| weight_decay | 0.0005 |
+| Veri seti | `part_1`, 300 görsel → 240 train / 60 validation (%80/%20) |
+| Inference confidence threshold | 0.15 (`detector.py --conf`, bu kamera için ayrıca doğrulandı) |
+| Ağırlık dosyaları | `weights/best.pt` (kullanılan), `weights/last.pt` |
+
+**AutoBatch notu:** `batch=-1` verildiğinde Ultralytics eğitim başında GPU belleğine göre gerçek sayıyı kendisi hesaplıyor; bu değer eğitim anında konsola basılıyor ama `args.yaml`'a kaydedilmiyor, o yüzden orijinal eğitimin konsол çıktısı elimizde yoktu. Yukarıdaki **16** değeri, `ultralytics.utils.autobatch.check_train_batch_size(yolov8x, imgsz=640)` fonksiyonu bu makinede tekrar çalıştırılarak elde edildi (model YENİDEN EĞİTİLMEDİ, sadece AutoBatch hesaplaması tekrarlandı). Hesaplama veri setinden bağımsız, sadece model+çözünürlük+GPU'ya bağlı olduğu için orijinal eğitimdekiyle aynı sonucu vermesi beklenir.
+
+**IMG_SIZE=640 notu:** İlk denemede imgsz=1280 (detector.py/roi.py ile aynı) ile GPU belleği (8GB, RTX 4070 Laptop) yetmemişti (CUDA out of memory). 640, YOLOv8'in standart/varsayılan eğitim çözünürlüğü — bellek ihtiyacını ~4'te 1'e indirdi, kartta rahat çalıştı. Eğitim çözünürlüğünün inference (detector.py/roi.py, 1280) ile birebir aynı olması şart değil.
 
 ---
 
-## Sonuç özeti (best.pt — epoch 25)
-
-| Metrik | Değer | Basitçe ne demek |
-|---|---|---|
-| Precision | **0.709** | Modelin "kişi" dediği şeylerin %70.9'u gerçekten kişi (geri kalanı yanlış alarm) |
-| Recall | **0.674** | Gerçekte var olan kişilerin %67.4'ünü model buluyor (geri kalanını kaçırıyor) |
-| mAP50 | **0.707** | IoU eşiği %50 iken genel doğruluk skoru (0-1 arası, yüksek iyi) |
-| mAP50-95 | **0.387** | Daha katı/detaylı doğruluk skoru (kutunun konumu ne kadar hassas) |
-
----
-
-## 1. results.png — eğitimin genel gidişatı
+## 2. Eğitim ve Validation Eğrileri
 
 ![results](training/results.png)
 
@@ -60,11 +67,20 @@
 | 24 | 0.705 | 0.674 | 0.700 | 0.376 |
 | **25 (best.pt)** | **0.709** | **0.674** | 0.707 | **0.387** |
 
+### Sonuç özeti (best.pt — epoch 25)
+
+| Metrik | Değer | Basitçe ne demek |
+|---|---|---|
+| Precision | **0.709** | Modelin "kişi" dediği şeylerin %70.9'u gerçekten kişi (geri kalanı yanlış alarm) |
+| Recall | **0.674** | Gerçekte var olan kişilerin %67.4'ünü model buluyor (geri kalanını kaçırıyor) |
+| mAP50 | **0.707** | IoU eşiği %50 iken genel doğruluk skoru (0-1 arası, yüksek iyi) |
+| mAP50-95 | **0.387** | Daha katı/detaylı doğruluk skoru (kutunun konumu ne kadar hassas) |
+
 ---
 
-## 2. Güven eşiği (confidence) eğrileri
+## 3. Ek görsel analizler
 
-Bunlar "eşiği değiştirirsem ne olur" sorusuna cevap veriyor. Günlük kullanımda bakmana gerek yok, merak edersen:
+### 3.1 Güven eşiği (confidence) eğrileri
 
 | Dosya | Ne gösteriyor |
 |---|---|
@@ -73,9 +89,7 @@ Bunlar "eşiği değiştirirsem ne olur" sorusuna cevap veriyor. Günlük kullan
 | ![F1](training/BoxF1_curve.png) `BoxF1_curve.png` | İkisinin dengeli ortalaması — tepe noktası "en dengeli eşik" |
 | ![PR](training/BoxPR_curve.png) `BoxPR_curve.png` | Precision'ı Recall'a karşı çizer — eğri sağ-üst köşeye ne kadar yakınsa model o kadar iyi |
 
----
-
-## 3. Confusion Matrix (Karışıklık Matrisi)
+### 3.2 Confusion Matrix (Karışıklık Matrisi)
 
 **Normalize edilmiş (yüzde olarak, okuması kolay):**
 
@@ -92,17 +106,13 @@ Bunlar "eşiği değiştirirsem ne olur" sorusuna cevap veriyor. Günlük kullan
 
 Bu sayı (%38 doğru bulma) ilk bakışta yukarıdaki Recall (%67.4) ile çelişiyor gibi görünebilir — sebebi, YOLO'nun bu matrisi hesaplama yönteminin standart olarak daha KATI olması (küçük konum hatalarını bile "kaçırılmış" sayabiliyor). Günlük değerlendirme için yukarıdaki **Recall (%67.4)** sayısına güvenmek daha doğru.
 
----
-
-## 4. Eğitim verisi istatistiği
+### 3.3 Eğitim verisi istatistiği
 
 ![labels](training/labels.jpg)
 
 300 görseldeki tüm kutuların (etiketlerin) boyut/konum dağılımı — kutuların ekranda nerede yoğunlaştığı gibi. Sorun teşhisi için kullanılır (örn. "kutular hep aynı köşede mi" gibi), günlük takip için önemli değil.
 
----
-
-## 5. Eğitim sırasında örnek kareler
+### 3.4 Eğitim sırasında örnek kareler
 
 Modele eğitim SIRASINDA gösterilen örnek kareler, üzerlerinde gerçek (insan etiketlemesi) kutular var — sadece "veri doğru okunuyor mu" diye görsel kontrol amaçlı.
 
@@ -118,13 +128,11 @@ Modele eğitim SIRASINDA gösterilen örnek kareler, üzerlerinde gerçek (insan
 ![train_batch3601](training/train_batch3601.jpg)
 ![train_batch3602](training/train_batch3602.jpg)
 
----
-
-## 6. Gerçek vs Tahmin — en öğretici karşılaştırma
+### 3.5 Gerçek vs Tahmin — en öğretici karşılaştırma
 
 Aynı validation görüntüleri, iki versiyon: `_labels` = **gerçek** (insan etiketlemesi), `_pred` = **modelin tahmini**. Aradaki fark, modelin nerede eksik kaldığını gösteriyor.
 
-### Grup 1 (val_batch0)
+**Grup 1 (val_batch0)**
 
 **Gerçek etiketler (ground truth):**
 ![val_batch0_labels](training/val_batch0_labels.jpg)
@@ -134,7 +142,7 @@ Aynı validation görüntüleri, iki versiyon: `_labels` = **gerçek** (insan et
 
 **Gözlem:** İnsan etiketlemesinde geçitteki hemen hemen herkes kutulanmış (~15+ kişi, kalabalık), model tahmininde ise daha azı (~6 kişi, güven skorlarıyla: person 0.7, person 0.4 gibi — düşük skorlar modelin "emin olamadığı" tespitler). Bu, modelin özellikle kalabalık/uzak kişilerde hâlâ geliştirilebilir olduğunu gösteriyor — 240 görsellik küçük bir pilot veri seti için beklenen bir durum, veri seti büyüdükçe (part_2, part_3...) düzelmesi beklenir.
 
-### Grup 2 (val_batch1)
+**Grup 2 (val_batch1)**
 
 **Gerçek etiketler:**
 ![val_batch1_labels](training/val_batch1_labels.jpg)
@@ -142,7 +150,7 @@ Aynı validation görüntüleri, iki versiyon: `_labels` = **gerçek** (insan et
 **Model tahminleri:**
 ![val_batch1_pred](training/val_batch1_pred.jpg)
 
-### Grup 3 (val_batch2)
+**Grup 3 (val_batch2)**
 
 **Gerçek etiketler:**
 ![val_batch2_labels](training/val_batch2_labels.jpg)
@@ -152,15 +160,15 @@ Aynı validation görüntüleri, iki versiyon: `_labels` = **gerçek** (insan et
 
 ---
 
-## 7. Model dosyaları
+## 4. Özet grafik
 
-`weights/` klasöründe:
-- **`best.pt`** — en yüksek skora sahip epoch'un ağırlıkları (epoch 25, yukarıdaki tablo) — projede kullandığımız/kullanmamız gereken dosya bu.
-- **`last.pt`** — eğitimin son epoch'undaki ağırlıklar (bu pilotta best.pt ile aynı epoch'a denk geliyor).
+![summary](training/summary_curve.png)
+
+Tek pencerede: sol eksen train/val toplam loss (mavi/kırmızı, düşmesi iyi — ikisi birlikte düşüyor, ayrışma yok, ezberleme işareti YOK), sağ eksen val precision/recall/mAP50 (yeşil/turuncu/mor, yükselmesi iyi). Tek bakışta "bu model nasıl öğrendi" sorusunun cevabı.
 
 ---
 
-## 8. Inference Testleri (video üzerinde gerçek çalıştırma)
+## 5. Inference Testleri (video üzerinde gerçek çalıştırma)
 
 Bu bölüm, modelin eğitim/validation metriklerinin ÖTESİNDE, gerçek video dosyaları üzerinde `detector.py` ile çalıştırılıp göz ile kontrol edildiği testleri listeler. Her test `inference_tests/<video_adı>/` altında kendi çıktı videosuyla duruyor.
 
@@ -180,6 +188,6 @@ Bu bölüm, modelin eğitim/validation metriklerinin ÖTESİNDE, gerçek video d
 
 Fine-tuning gerçekten öğrendi (loss düştü, mAP yükseldi) ama küçük/tek-kaynaklı bir pilot veri seti (sadece part_1, 240 görsel) olduğu için:
 - Kendi kaynağında (part_1) makul ama mükemmel olmayan bir performans var (Recall %67.4 — 3 kişiden 1'ini bazı karelerde kaçırıyor).
-- Farklı bir kamerada (`frames/` = `videos/Video1.mp4`) test edildiğinde performans daha da düşüyor (ayrı bir konuşmada detaylandırıldı) — bu kameraya özel etiketli veri eklemek gerekiyor.
+- Farklı bir kamerada (`frames/` = `videos/Video1.mp4`) test edildiğinde performans daha da düşüyor (bkz. [COMPARISON.md](../COMPARISON.md)) — bu kameraya özel etiketli veri eklemek gerekiyor.
 
 **Sonraki adım:** Video1.mp4 ve yeni veri kaynaklarından (Bellevue traffic dataset) örnekler etiketleyip, part_1 ile BİRLİKTE (üzerine yazmadan) fine-tuning'i tekrarlamak.

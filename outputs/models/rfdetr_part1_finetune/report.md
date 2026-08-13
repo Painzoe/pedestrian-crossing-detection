@@ -6,40 +6,41 @@
 
 **Neden RF-DETR:** YOLOv8x (CNN tabanlı) ile paralel/kıyaslamalı bir deneme — transformer tabanlı modellerin farklı kameralara (domain shift) daha dayanıklı olduğu iddiası test ediliyor.
 
-**Ayarlar:** 25 epoch (YOLO ile aynı — adil kıyaslama), çözünürlük 576px, batch_size=3 (auto-batch tarafından seçildi), grad_accum_steps=6 (etkin batch ~16-18), lr=1e-4.
-
 **Veri seti notu:** RF-DETR train/valid/test olmak üzere 3 klasör istiyor. Bizim veri setimiz küçük (300 görsel) olduğu için ayrı bir 3'lü bölme YAPILMADI — YOLO ile birebir aynı 60 görsellik validation seti hem "valid" hem "test" olarak kullanıldı (`prepare_dataset_rfdetr.py`). Amaç: iki modeli tam olarak aynı görüntüler üzerinde karşılaştırabilmek.
 
 ---
 
-## Sonuç özeti (best.pth — epoch 24/25, EMA)
+## 1. Ayarlar / Configuration
 
-| Metrik | RF-DETR | YOLO (karşılaştırma) | Fark |
-|---|---|---|---|
-| Precision | **0.718** | 0.709 | +0.009 |
-| Recall | **0.762** | 0.674 | **+0.088** |
-| mAP50 | **0.765** | 0.707 | **+0.058** |
-| mAP50-95 | **0.433** | 0.387 | **+0.046** |
+| Ayar | Değer |
+|---|---|
+| Base model | `RFDETRMedium` (COCO ön-eğitimli, `rf-detr-medium.pth`) |
+| Epoch | 25 |
+| Batch size | **3** (auto-batch, gerçekten kullanılan değer — `training_config.json`'da kayıtlı) |
+| Grad accumulation steps | 6 (etkin batch ≈ 18, hedef etkin batch 16) |
+| Çözünürlük | 576px |
+| Optimizer | AdamW |
+| lr (backbone) / lr_encoder | 0.0001 / 0.00015 |
+| weight_decay | 0.0001 |
+| Veri seti | `part_1`, 240 train / 60 validation (YOLO ile birebir aynı görseller, COCO formatına çevrilmiş) |
+| Inference confidence threshold | **0.5** (bkz. bölüm 5 — 0.15 hatalıydı, düzeltildi) |
+| Ağırlık dosyaları | `weights/best.pth` (EMA tabanlı en iyi checkpoint), `weights/last.pth` |
 
-**RF-DETR bu veri setinde tüm metriklerde YOLO'yu geçti**, özellikle Recall'da (kişileri kaçırmama oranı) belirgin bir fark var. En iyi checkpoint (EMA - Exponential Moving Average, epoch 24) mAP50-95'te 0.443'e kadar çıkıyor; tabloda RF-DETR'nin epoch 25 "regular" (EMA olmayan) sonuçları YOLO ile daha adil kıyaslanabilir olduğu için kullanıldı.
-
-**Not (EMA nedir, basitçe):** Eğitim sırasında modelin ağırlıklarının "hareketli ortalaması" ayrıca tutulur — bu genelde tek bir epoch'un ham ağırlıklarından biraz daha kararlı/genellenebilir sonuç verir. `weights/best.pth` = EMA tabanlı en iyi checkpoint (RF-DETR'in kendi seçimi, `checkpoint_best_total.pth`).
+**Not (batch size, YOLO ile farkı):** RF-DETR'de `batch_size=3` YOLO'nunkinden (16) çok düşük görünüyor ama yanıltıcı — RF-DETR `grad_accum_steps=6` ile 6 mini-batch'i biriktirip tek seferde güncelliyor, yani **etkin batch ≈ 18**, YOLO'ya (16) yakın bir değer. Bu, kendi `auto_batch_target_effective: 16` ayarına göre kütüphanenin kendisinin seçtiği bir kombinasyon (`training_config.json`'da kayıtlı, retroaktif hesaplamaya gerek kalmadı).
 
 ---
 
-## Görsel rapor hakkında bir not
-
-RF-DETR, YOLO'nun (Ultralytics) aksine eğitim bitince otomatik olarak grafik/görsel üretmiyor — sadece ham `metrics.csv` ve checkpoint dosyaları veriyor. Aşağıdaki TÜM görseller (`results.png`, güven-eşiği eğrileri, confusion matrix, `labels.jpg`, örnek kareler) `generate_rfdetr_report_assets.py` ile SONRADAN elle üretildi — model tekrar eğitilmedi, sadece zaten eğitilmiş `weights/best.pth` kullanılıp validation setinde çalıştırıldı. YOLO'nun raporuyla aynı yapıda/isimde tutuldu ki iki rapor yan yana okunabilsin.
-
----
-
-## 1. results.png — eğitimin genel gidişatı
+## 2. Eğitim ve Validation Eğrileri
 
 ![results](training/results.png)
 
-YOLO'daki gibi aynı mantık: üstteki 3 grafik (loss_bbox, loss_ce, loss_giou) train kaybını gösteriyor (**düşmesi iyi**), sağ üstteki Precision ile alt sıradaki Recall/mAP50/mAP50-95 (**yükselmesi iyi**). Sol alttaki val/loss_bbox de düşüyor — model ezberlemiyor, gerçekten öğreniyor.
+**Grafik güncellemesi (rapor denetimi sonrası):** İlk versiyonda sadece `train/loss_ce` ve `train/loss_giou` çizilmiş, VAL eşlenikleri (`val/loss_ce`, `val/loss_giou`) atlanmıştı — bu denetimde bulundu ve düzeltildi. Şimdi 4x4'lük grafik şunları içeriyor:
 
-**Epoch bazında ilerleme (tüm 25 epoch):**
+- **Satır 0-1 (train/val eşleşen çiftler):** `loss_bbox`, `loss_ce` (sınıflandırma), `loss_giou` (kutu örtüşme), `class_error` — her biri hem train (üst) hem val (alt) olarak yan yana. İkisi birlikte düşüyor/düzeliyor olması "ezberlemiyor, gerçekten öğreniyor" demek.
+- **Satır 2:** `cardinality_error` (train+val çifti — modelin tahmin ettiği kutu SAYISININ gerçek sayıdan ne kadar saptığı), `F1`, `AP (person)`.
+- **Satır 3:** val-only başarı metrikleri — precision, recall, mAP50, mAP50-95 (bunların train karşılığı yok, bu normal — YOLO'da da precision/recall sadece val'de hesaplanıyor).
+
+**Epoch bazında ilerleme (tüm 25 epoch, val metrikleri):**
 
 | Epoch | Precision | Recall | mAP50 | mAP50-95 |
 |---|---|---|---|---|
@@ -71,9 +72,26 @@ YOLO'daki gibi aynı mantık: üstteki 3 grafik (loss_bbox, loss_ce, loss_giou) 
 
 YOLO'nun ilk birkaç epoch'unda gördüğümüz büyük dalgalanmalar (epoch 5'te çöküş gibi) burada yok — RF-DETR daha 3-4. epoch'ta zaten YOLO'nun 25 epoch sonunda ulaştığı seviyeye yakın bir yerde, sonrası daha istikrarlı bir iyileşme.
 
+### Sonuç özeti (best.pth — epoch 24/25, EMA)
+
+| Metrik | RF-DETR | YOLO (karşılaştırma) | Fark |
+|---|---|---|---|
+| Precision | **0.718** | 0.709 | +0.009 |
+| Recall | **0.762** | 0.674 | **+0.088** |
+| mAP50 | **0.765** | 0.707 | **+0.058** |
+| mAP50-95 | **0.433** | 0.387 | **+0.046** |
+
+**RF-DETR bu veri setinde tüm metriklerde YOLO'yu geçti**, özellikle Recall'da (kişileri kaçırmama oranı) belirgin bir fark var.
+
+**Not (EMA nedir, basitçe):** Eğitim sırasında modelin ağırlıklarının "hareketli ortalaması" ayrıca tutulur — bu genelde tek bir epoch'un ham ağırlıklarından biraz daha kararlı/genellenebilir sonuç verir. `weights/best.pth` = EMA tabanlı en iyi checkpoint (RF-DETR'in kendi seçimi, `checkpoint_best_total.pth`).
+
 ---
 
-## 2. Güven eşiği (confidence) eğrileri
+## 3. Ek görsel analizler
+
+RF-DETR, YOLO'nun (Ultralytics) aksine eğitim bitince otomatik olarak grafik/görsel üretmiyor — sadece ham `metrics.csv` ve checkpoint dosyaları veriyor. Bu bölümdeki TÜM görseller `generate_rfdetr_report_assets.py` ile SONRADAN elle üretildi — model tekrar eğitilmedi, sadece zaten eğitilmiş `weights/best.pth` kullanılıp validation setinde çalıştırıldı. YOLO'nun raporuyla aynı yapıda/isimde tutuldu ki iki rapor yan yana okunabilsin.
+
+### 3.1 Güven eşiği (confidence) eğrileri
 
 Validation setindeki 60 görüntüde, çok geniş bir güven-eşiği aralığı (0.02-0.98) taranarak hesaplandı (IoU eşiği 0.5). Bu, tam olarak `Video1.mp4` testinde yaşadığımız "0.15 çok gevşekmiş" sorununu bir daha yaşamamak için — hangi eşiğin gerçekten iyi olduğunu artık gözle tahmin değil, sayıyla biliyoruz.
 
@@ -86,25 +104,19 @@ Validation setindeki 60 görüntüde, çok geniş bir güven-eşiği aralığı 
 
 **Bulgu:** En iyi F1 noktası eşik=**0.34**'te (P=0.707, R=0.759, F1=0.732). Biz inference testlerinde ve `detector_rfdetr.py`'de **0.5** kullandık (rfdetr kütüphanesinin kendi varsayılanı, ve Video1.mp4'te elle doğruladığımız temiz nokta) — 0.34'e göre biraz daha temkinli (Precision'ı önceliklendiren) bir seçim, kasıtlı: yanlış alarmı azaltmak, kaçırmaktan daha az riskli görüldü.
 
----
-
-## 3. Confusion Matrix (eşik=0.5)
+### 3.2 Confusion Matrix (eşik=0.5)
 
 ![confusion matrix normalized](training/confusion_matrix_normalized.png)
 
 Tek sınıf (person) olduğu için matris YOLO'dakinden biraz farklı okunuyor: satırlar gerçek durumu (person / FP), sütunlar tahmini (person / FN) gösteriyor. Kesin sayılar için: Precision **0.718**, Recall **0.762** (yukarıdaki özet tablo) — bu ikisine güvenmek confusion matrix'in ham görüntüsünden daha güvenilir, tek-sınıflı tespit problemlerinde bu matrisin okunuşu kafa karıştırıcı olabiliyor (YOLO raporunda da aynı notu düşmüştük).
 
----
-
-## 4. Eğitim verisi istatistiği
+### 3.3 Eğitim verisi istatistiği
 
 ![labels](training/labels.jpg)
 
 240 eğitim görselindeki tüm kutuların (etiketlerin) konum ve boyut dağılımı — YOLO'nun `labels.jpg`'sinin RF-DETR/COCO formatı için elle üretilmiş hali.
 
----
-
-## 5. Eğitim verisinden örnek kareler (gerçek etiketlerle)
+### 3.4 Eğitim verisinden örnek kareler (gerçek etiketlerle)
 
 ![train_batch0](training/train_batch0.jpg)
 ![train_batch1](training/train_batch1.jpg)
@@ -112,35 +124,33 @@ Tek sınıf (person) olduğu için matris YOLO'dakinden biraz farklı okunuyor: 
 
 Rastgele seçilmiş 3 eğitim görseli, üzerlerinde COCO annotasyon dosyasındaki gerçek (insan etiketlemesi) kutular çizili — "veri doğru okunuyor mu" diye görsel kontrol.
 
----
-
-## 6. Gerçek vs Tahmin — validation setinden örnekler
+### 3.5 Gerçek vs Tahmin — validation setinden örnekler
 
 Aynı validation görüntüleri, iki versiyon: yeşil kutular = **gerçek** (COCO etiketi), turuncu kutular = **modelin tahmini** (eşik=0.5).
 
-### Grup 1
+**Grup 1**
 **Gerçek:** ![val_batch0_labels](training/val_batch0_labels.jpg)
 **Tahmin:** ![val_batch0_pred](training/val_batch0_pred.jpg)
 
-### Grup 2
+**Grup 2**
 **Gerçek:** ![val_batch1_labels](training/val_batch1_labels.jpg)
 **Tahmin:** ![val_batch1_pred](training/val_batch1_pred.jpg)
 
-### Grup 3
+**Grup 3**
 **Gerçek:** ![val_batch2_labels](training/val_batch2_labels.jpg)
 **Tahmin:** ![val_batch2_pred](training/val_batch2_pred.jpg)
 
 ---
 
-## 7. Model dosyaları
+## 4. Özet grafik
 
-`weights/` klasöründe:
-- **`best.pth`** — en iyi checkpoint (EMA tabanlı, RF-DETR'in kendi seçimi: `checkpoint_best_total.pth`)
-- **`last.pth`** — son epoch'un EMA ağırlıkları
+![summary](training/summary_curve.png)
+
+Sol eksen train/val toplam loss (`train/loss` ve `val/loss` — RF-DETR'de metrics.csv'de zaten hazır tek bir toplam loss kolonu var, YOLO'daki gibi bileşenleri toplamaya gerek kalmadı), sağ eksen val precision/recall/mAP50. Train ve val loss'un birbirinden ayrışmadan birlikte düşmesi (ezberleme yok) ve accuracy metriklerinin istikrarlı yükselişi tek bakışta görülüyor.
 
 ---
 
-## 8. Inference Testleri (video üzerinde gerçek çalıştırma)
+## 5. Inference Testleri (video üzerinde gerçek çalıştırma)
 
 **ÖNEMLİ DÜZELTME (eşik/threshold hatası):** İlk denemede `detector_rfdetr.py`'de YOLO'dan alışkanlıkla `conf=0.15` kullandım - bu YANLIŞTI, doğrulamadan yapılmış bir varsayımdı. RF-DETR'nin güven skoru YOLO ile aynı ölçekte değil; 0.15'te videolarda insanla hiç ilgisi olmayan (direk, tabela, gölge, boş kaldırım) çok sayıda yanlış kutu çıktı - bunu kullanıcı fark edip uyardı. Kontrol ettim: eşiği 0.5'e çıkarınca (rfdetr kütüphanesinin de kendi varsayılanı zaten 0.5) bu hayali kutuların hemen hepsi kayboldu, kalanlar gözle doğrulanabilir gerçek kişilerdi. Üç video da SİLİNİP 0.5 eşiğiyle YENİDEN oluşturuldu - aşağıdaki tablo düzeltilmiş/doğru sonuçlar.
 
@@ -158,7 +168,7 @@ Aynı validation görüntüleri, iki versiyon: yeşil kutular = **gerçek** (COC
 
 ---
 
-## 9. YOLO ile genel kıyaslama
+## Genel değerlendirme
 
 | | YOLOv8x (part1_pilot) | RF-DETR-Medium (part1_finetune) |
 |---|---|---|
@@ -171,4 +181,4 @@ Aynı validation görüntüleri, iki versiyon: yeşil kutular = **gerçek** (COC
 | Video1.mp4 (hedef kamera) ort. kişi/kare | 1.22 (geçitteki insanları kaçırıyor) | **2.14** (geçitteki insanları doğru buluyor) |
 | video01.mp4 ort. kişi/kare | 5.90 | **11.84** |
 
-**Sonuç:** Bu pilot denemede RF-DETR, YOLOv8x'e göre hem doğrulama metriklerinde (Precision/Recall/mAP) hem hızda hem de EN ÖNEMLİSİ hiç görmediği kameralara genellemede (Video1.mp4, video01.mp4) daha iyi çıktı. Kullanıcı çıktı videoları gözle kontrol edip doğruladı.
+**Sonuç:** Bu pilot denemede RF-DETR, YOLOv8x'e göre hem doğrulama metriklerinde (Precision/Recall/mAP) hem hızda hem de EN ÖNEMLİSİ hiç görmediği kameralara genellemede (Video1.mp4, video01.mp4) daha iyi çıktı. Kullanıcı çıktı videoları gözle kontrol edip doğruladı. Detaylı 6 model karşılaştırması için [COMPARISON.md](../COMPARISON.md).

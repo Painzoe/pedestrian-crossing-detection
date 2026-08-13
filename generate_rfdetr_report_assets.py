@@ -77,38 +77,66 @@ def plot_training_curves():
     epochs_val = val_df["epoch"] + 1  # RF-DETR epoch'lari 0-indeksli, YOLO gibi 1'den baslat
     epochs_train = train_df["epoch"] + 1
 
-    fig, axes = plt.subplots(2, 4, figsize=(20, 8))
+    # DUZELTME (rapor eksiklik denetimi sonrasi): ilk versiyonda train
+    # tarafinda cizilen loss_ce/loss_giou/class_error/cardinality_error
+    # icin VAL esleniginin cizilmemis olmasi eksiklik olarak tespit
+    # edildi (veri metrics.csv'de zaten vardi, sadece grafige islenmemisti).
+    # Simdi HER train metriginin val esleniyle YAN YANA (ayni sutunda,
+    # ust=train alt=val) cizildigi 4x4'luk daha genis bir izgaraya
+    # gecildi - hicbir train/val cifti tek tarafli kalmasin diye.
+    fig, axes = plt.subplots(4, 4, figsize=(20, 16))
 
-    # --- Ust sira: train loss bilesenleri (YOLO'nun box/cls/dfl_loss'una benzer) ---
+    # --- Satir 0: train loss/hata bilesenleri ---
     axes[0, 0].plot(epochs_train, train_df["train/loss_bbox"], marker="o")
     axes[0, 0].set_title("train/loss_bbox")
     axes[0, 1].plot(epochs_train, train_df["train/loss_ce"], marker="o")
     axes[0, 1].set_title("train/loss_ce (siniflandirma)")
     axes[0, 2].plot(epochs_train, train_df["train/loss_giou"], marker="o")
     axes[0, 2].set_title("train/loss_giou (kutu ortusme)")
-    axes[0, 3].plot(epochs_val, val_df["val/precision"], marker="o", color="tab:green")
-    axes[0, 3].set_title("metrics/precision")
+    axes[0, 3].plot(epochs_train, train_df["train/class_error"], marker="o")
+    axes[0, 3].set_title("train/class_error")
 
-    # --- Alt sira: val loss + basari metrikleri ---
+    # --- Satir 1: AYNI metriklerin VAL esleniyi (satir 0 ile ayni sutun) ---
     axes[1, 0].plot(epochs_val, val_df["val/loss_bbox"], marker="o", color="tab:orange")
     axes[1, 0].set_title("val/loss_bbox")
-    axes[1, 1].plot(epochs_val, val_df["val/recall"], marker="o", color="tab:green")
-    axes[1, 1].set_title("metrics/recall")
-    axes[1, 2].plot(epochs_val, val_df["val/mAP_50"], marker="o", color="tab:green")
-    axes[1, 2].set_title("metrics/mAP50")
-    axes[1, 3].plot(epochs_val, val_df["val/mAP_50_95"], marker="o", color="tab:green")
-    axes[1, 3].set_title("metrics/mAP50-95")
+    axes[1, 1].plot(epochs_val, val_df["val/loss_ce"], marker="o", color="tab:orange")
+    axes[1, 1].set_title("val/loss_ce (siniflandirma)")
+    axes[1, 2].plot(epochs_val, val_df["val/loss_giou"], marker="o", color="tab:orange")
+    axes[1, 2].set_title("val/loss_giou (kutu ortusme)")
+    axes[1, 3].plot(epochs_val, val_df["val/class_error"], marker="o", color="tab:orange")
+    axes[1, 3].set_title("val/class_error")
+
+    # --- Satir 2: cardinality_error (train+val cifti) + F1 + AP/person ---
+    axes[2, 0].plot(epochs_train, train_df["train/cardinality_error"], marker="o")
+    axes[2, 0].set_title("train/cardinality_error")
+    axes[2, 1].plot(epochs_val, val_df["val/cardinality_error"], marker="o", color="tab:orange")
+    axes[2, 1].set_title("val/cardinality_error")
+    axes[2, 2].plot(epochs_val, val_df["val/F1"], marker="o", color="tab:green")
+    axes[2, 2].set_title("metrics/F1")
+    axes[2, 3].plot(epochs_val, val_df["val/AP/person"], marker="o", color="tab:green")
+    axes[2, 3].set_title("val/AP (person)")
+
+    # --- Satir 3: val-only basari metrikleri (train'de esdegeri yok - normal) ---
+    axes[3, 0].plot(epochs_val, val_df["val/precision"], marker="o", color="tab:green")
+    axes[3, 0].set_title("metrics/precision")
+    axes[3, 1].plot(epochs_val, val_df["val/recall"], marker="o", color="tab:green")
+    axes[3, 1].set_title("metrics/recall")
+    axes[3, 2].plot(epochs_val, val_df["val/mAP_50"], marker="o", color="tab:green")
+    axes[3, 2].set_title("metrics/mAP50")
+    axes[3, 3].plot(epochs_val, val_df["val/mAP_50_95"], marker="o", color="tab:green")
+    axes[3, 3].set_title("metrics/mAP50-95")
 
     for ax in axes.flat:
         ax.set_xlabel("epoch")
         ax.grid(alpha=0.3)
 
-    fig.suptitle("RF-DETR-Medium egitim egrileri (part1_finetune)", fontsize=14)
+    fig.suptitle("RF-DETR-Medium egitim egrileri (part1_finetune) - satir 0-1: train/val esleseni,"
+                 " satir 2: cardinality+F1+AP, satir 3: val-only basari metrikleri", fontsize=13)
     fig.tight_layout()
     out_path = os.path.join(TRAINING_DIR, "results.png")
     fig.savefig(out_path, dpi=120)
     plt.close(fig)
-    print(f"  results.png kaydedildi: {out_path}")
+    print(f"  results.png kaydedildi (4x4, tum train/val ciftleri dahil): {out_path}")
 
 
 # ============================================================

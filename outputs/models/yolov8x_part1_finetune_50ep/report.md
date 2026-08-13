@@ -8,7 +8,7 @@
 
 ## ÖNEMLİ UYARI: Bu model OVERFIT olmuş, kullanma
 
-**Özet:** 50 epoch, `part_1`'in KENDİ doğrulama setinde sayıları biraz iyileştirdi (mAP50 0.707→0.720) ama **hedef kamerada (`Video1.mp4`) modeli tamamen bozdu** — ortalama kişi/kare **1.22'den 36.24'e** fırladı. Bu daha fazla insan bulmak değil, modelin ağaç/çalı/gölge gibi rastgele dokuları "insan" sanmaya başlaması (bkz. bölüm 8).
+**Özet:** 50 epoch, `part_1`'in KENDİ doğrulama setinde sayıları biraz iyileştirdi (mAP50 0.707→0.720) ama **hedef kamerada (`Video1.mp4`) modeli tamamen bozdu** — ortalama kişi/kare **1.22'den 36.24'e** fırladı. Bu daha fazla insan bulmak değil, modelin ağaç/çalı/gölge gibi rastgele dokuları "insan" sanmaya başlaması (bkz. bölüm 5).
 
 **Neden eğitim grafikleri bunu göstermiyor:** Aşağıdaki `results.png` ve epoch tablosuna bakarsan her şey normal/iyi görünüyor — çünkü validation seti de `part_1`'in KENDİ kamerasından (aynı görsel "stil"). Model, part_1'in özel görünümüne o kadar alıştı ki kendi validation setinde hâlâ iyi skor alıyor, ama bu "ezberleme" farklı bir kamerada (Video1.mp4) tamamen çöküyor. **Bu, sadece formal validation metriklerine bakmanın neden yetmediğinin, gerçek video testi yapmanın neden şart olduğunun kanıtı.**
 
@@ -16,26 +16,31 @@
 
 ---
 
-## Sonuç özeti (best.pt — validation, part_1'in kendi seti)
+## 1. Ayarlar / Configuration
 
-| Metrik | Değer (epoch 50, final) |
+| Ayar | Değer |
 |---|---|
-| Precision | 0.719 |
-| Recall | 0.721 |
-| mAP50 | 0.720 |
-| mAP50-95 | 0.402 |
-
-(25 epoch'luk modelle neredeyse aynı/hafif iyi — ama bu sayılar YANILTICI, yukarıdaki uyarıya bak.)
+| Base model | `yolov8x.pt` (COCO ön-eğitimli) |
+| Epoch | 50 |
+| Batch size | **16** (AutoBatch, `batch=-1` — [25ep raporundaki](../yolov8x_part1_finetune/report.md) gibi retroaktif olarak doğrulandı) |
+| imgsz | 640 |
+| Optimizer | `auto` |
+| lr0 / lrf | 0.01 / 0.01 |
+| momentum | 0.937 |
+| weight_decay | 0.0005 |
+| Veri seti | `part_1`, 240 train / 60 validation (25ep ile BİREBİR AYNI) |
+| Inference confidence threshold | 0.15 (varsayılan), ayrıca 0.3 da denendi (bkz. bölüm 5) |
+| Ağırlık dosyaları | `weights/best.pt`, `weights/last.pt` — **UYARI: yukarıdaki overfitting sorunu nedeniyle gerçek kullanım için önerilmiyor.** |
 
 ---
 
-## 1. results.png — eğitimin genel gidişatı
+## 2. Eğitim ve Validation Eğrileri
 
 ![results](training/results.png)
 
 Grafiklere bakınca hiçbir "kötüye gidiş" işareti YOK — loss düşüyor, mAP/precision/recall genel olarak yükseliyor (epoch 3-18 arasında birkaç sert dalgalanma var, muhtemelen öğrenme oranı programından kaynaklanıyor, sonra istikrarlı iyileşme). Bu TAM OLARAK sorunun can alıcı noktası: bu grafik **overfitting'i göstermiyor** çünkü onu ölçemez (validation seti aynı domain'den).
 
-**Epoch bazında ilerleme (tüm 50 epoch):**
+**Epoch bazında ilerleme (tüm 50 epoch, her 5'te bir):**
 
 | Epoch | Precision | Recall | mAP50 | mAP50-95 |
 |---|---|---|---|---|
@@ -53,9 +58,22 @@ Grafiklere bakınca hiçbir "kötüye gidiş" işareti YOK — loss düşüyor, 
 
 *(Ham/tüm satırlar için `training/results.csv`'ye bakabilirsin — burada okunabilirlik için her 5 epoch'ta bir gösterildi.)*
 
+### Sonuç özeti (best.pt — validation, part_1'in kendi seti)
+
+| Metrik | Değer (epoch 50, final) |
+|---|---|
+| Precision | 0.719 |
+| Recall | 0.721 |
+| mAP50 | 0.720 |
+| mAP50-95 | 0.402 |
+
+(25 epoch'luk modelle neredeyse aynı/hafif iyi — ama bu sayılar YANILTICI, yukarıdaki uyarıya bak.)
+
 ---
 
-## 2. Güven eşiği eğrileri
+## 3. Ek görsel analizler
+
+### 3.1 Güven eşiği eğrileri
 
 | Dosya | Ne gösteriyor |
 |---|---|
@@ -66,42 +84,36 @@ Grafiklere bakınca hiçbir "kötüye gidiş" işareti YOK — loss düşüyor, 
 
 **F1 eğrisinin tepe noktası: eşik≈0.125, F1=0.71** — kullandığımız 0.15 buna çok yakın, neredeyse ideal. **AMA bu eğri de `part_1`'in kendi validation setinden geliyor — Video1.mp4'teki gerçek sorunu (overfitting) göstermez.** Kullanıcı bunu fark edip "eşiği artıralım mı" diye sordu; cevap hayırdı çünkü sorun eşik değil, modelin kendisiydi (bkz. yukarıdaki uyarı).
 
----
-
-## 3. Confusion Matrix
+### 3.2 Confusion Matrix
 
 ![confusion matrix](training/confusion_matrix_normalized.png)
 
----
-
-## 4. Eğitim verisi istatistiği
+### 3.3 Eğitim verisi istatistiği
 
 ![labels](training/labels.jpg)
 
----
-
-## 5. Eğitim sırasında örnek kareler
+### 3.4 Eğitim sırasında örnek kareler
 
 ![train_batch0](training/train_batch0.jpg)
 ![train_batch1](training/train_batch1.jpg)
 ![train_batch2](training/train_batch2.jpg)
 
----
-
-## 6. Gerçek vs Tahmin (validation seti)
+### 3.5 Gerçek vs Tahmin (validation seti)
 
 **Gerçek:** ![val_batch0_labels](training/val_batch0_labels.jpg)
 **Tahmin:** ![val_batch0_pred](training/val_batch0_pred.jpg)
 
 ---
 
-## 7. Model dosyaları
+## 4. Özet grafik
 
-`weights/best.pt`, `weights/last.pt` — **UYARI: yukarıdaki overfitting sorunu nedeniyle gerçek kullanım için önerilmiyor.**
+![summary](training/summary_curve.png)
+
+Sol eksen train/val toplam loss, sağ eksen val precision/recall/mAP50 — bu grafik de KENDİ validation setinden geldiği için overfitting'i GÖSTERMEZ (loss/mAP eğrileri normal görünüyor), asıl kanıt bölüm 5'teki gerçek video testinde.
 
 ---
 
-## 8. Inference Testleri — asıl gerçeği burada gördük
+## 5. Inference Testleri — asıl gerçeği burada gördük
 
 | Video | Kare | Süre | Hız | Ort. kişi/kare (50ep) | Ort. kişi/kare (25ep, kıyaslama) | Çıktı |
 |---|---|---|---|---|---|---|
@@ -114,4 +126,8 @@ Grafiklere bakınca hiçbir "kötüye gidiş" işareti YOK — loss düşüyor, 
 
 **Video1.mp4'te 36.24 ortalama** — kanıt için bkz. proje sohbetinde paylaşılan kare: aynı sahne, aynı 2 gerçek kişi, ama artık ağaçlara/çalılara/boş kaldırıma onlarca hayali "person 0.15-0.29" kutusu düşmüş. Bu görsel kanıt, formal metriklerin (yukarıdaki tablo) neden tek başına yeterli olmadığını gösteriyor.
 
-**Genel ders:** Fine-tuning'de "daha fazla epoch = daha iyi model" VARSAYIMI burada YANLIŞ çıktı. Küçük/tek-kaynaklı (240 görsel, tek kamera) bir veri setinde epoch sayısını artırmak, modelin o TEK kameraya aşırı özelleşmesine (ve farklı kameralarda çökmesine) yol açtı. RF-DETR aynı deneyde bu sorunu yaşamadı (bkz. [RF-DETR 50ep raporu](../rfdetr_part1_finetune_50ep/report.md) ve [genel karşılaştırma](../COMPARISON.md)).
+---
+
+## Genel değerlendirme
+
+Fine-tuning'de "daha fazla epoch = daha iyi model" VARSAYIMI burada YANLIŞ çıktı. Küçük/tek-kaynaklı (240 görsel, tek kamera) bir veri setinde epoch sayısını artırmak, modelin o TEK kameraya aşırı özelleşmesine (ve farklı kameralarda çökmesine) yol açtı. RF-DETR aynı deneyde bu sorunu yaşamadı (bkz. [RF-DETR 50ep raporu](../rfdetr_part1_finetune_50ep/report.md) ve [genel karşılaştırma](../COMPARISON.md)).
