@@ -95,4 +95,17 @@ En iyi F1 noktası: eşik=**0.42** (P=0.791, R=0.697, F1=0.741) — 25 epoch'ta 
 
 Üç videoda da 25ep ile 50ep sonuçları neredeyse aynı — RF-DETR için ekstra epoch'un ne büyük fayda ne zarar getirmediğini video testleri de doğruluyor.
 
+---
+
+## 9. conf (güven eşiği) denemesi — 0.3, `part_1.mp4` üzerinde
+
+RF-DETR'in yerleşik eşiği (0.5) yerine 0.3 denendi:
+
+| Eşik | Ort. kişi/kare | Yorum |
+|---|---|---|
+| 0.5 (varsayılan/kullanılan) | 10.32 | Temiz |
+| 0.3 (deneme) | **15.81** | Gözle kontrol edildi: fazladan kutuların büyük kısmı **gürültü** (insan olmayan nesneler/gölgeler) — YOLO'daki gibi bir "eksik tespiti kapatma" değil, tam tersi, eşiği gevşetince gürültü artıyor |
+
+**Sonuç:** RF-DETR-50ep için 0.5 eşiği doğru seçim olmaya devam ediyor; 0.3'e düşürmek doğruluğu artırmıyor, sadece yanlış pozitifleri çoğaltıyor. Çıktı: `inference_tests/part_1_conf0.3/part_1_detected_conf0.3.mp4`
+
 **Genel sonuç:** Bu deney RF-DETR'in YOLO'ya göre önemli bir avantajını daha ortaya çıkardı — sadece hiç görmediği kameralarda daha iyi genellemesi değil, aynı zamanda **fazla eğitime karşı daha dayanıklı olması**. Detaylı 4 model karşılaştırması için [COMPARISON.md](../COMPARISON.md).
