@@ -1,0 +1,11 @@
+ROI SAYIM RAPORU
+==================================================
+Video: /tmp/claude-1000/-home-painzoe-PycharmProjects-pedestrian-crossing-detection/b3007b58-8212-415a-9b90-86436bf0e991/scratchpad/video02_h264.mp4
+Model: rfdetr (50 epoch), conf=0.42
+ROI JSON: rois/video02_rois.json
+Gurultu filtresi: en az 5 ardisik taze kare (--roi-min-frames)
+
+crosswalk_1: 6 essiz kisi (ID'ler: [0, 4, 5, 25, 26, 41]) [filtre oncesi ham sayi: 12, elenen gurultu: 6]
+--------------------------------------------------
+TOPLAM (en az bir ROI'de sayilan essiz kisi, filtreli): 6
+(Not: bir kisi birden fazla ROI'de gorunmusse TOPLAM'da sadece 1 kere sayilir)

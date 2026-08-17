@@ -1,0 +1,11 @@
+ROI SAYIM RAPORU
+==================================================
+Video: data/raw_videos/video03.mp4
+Model: rfdetr (50 epoch), conf=0.42
+ROI JSON: rois/video03_rois.json
+
+crosswalk_1: 27 essiz kisi (ID'ler: [0, 15, 16, 20, 30, 31, 33, 34, 47, 53, 54, 64, 71, 76, 77, 79, 81, 82, 83, 84, 85, 86, 87, 88, 89, 99, 100])
+crosswalk_2: 29 essiz kisi (ID'ler: [3, 5, 7, 17, 18, 19, 21, 23, 26, 28, 39, 40, 41, 44, 46, 48, 49, 50, 57, 59, 60, 98, 105, 106, 108, 109, 111, 126, 127])
+--------------------------------------------------
+TOPLAM (en az bir ROI'de sayilan essiz kisi): 56
+(Not: bir kisi birden fazla ROI'de gorunmusse TOPLAM'da sadece 1 kere sayilir)

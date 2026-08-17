@@ -20,6 +20,7 @@ data/raw_videos/
 data/dataset_frames/
 data/coco_dataset/
 data/yolo_dataset/
+data/labeled_export/
 outputs/roi_frames/
 outputs/roi_frames2/
 outputs/tracked_frames/

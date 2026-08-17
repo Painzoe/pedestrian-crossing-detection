@@ -1,0 +1,30 @@
+{
+  "video": "crosswalk_output_video02_all3_instant.mp4",
+  "frame_resolution": {
+    "width": 1920,
+    "height": 1080
+  },
+  "rois": [
+    {
+      "name": "crosswalk_1",
+      "polygon_normalized": [
+        [
+          0.1452,
+          0.607
+        ],
+        [
+          0.9995,
+          0.6025
+        ],
+        [
+          1.0,
+          0.9919
+        ],
+        [
+          0.1458,
+          0.9965
+        ]
+      ]
+    }
+  ]
+}
