@@ -81,7 +81,7 @@ def load_rois(json_path, frame_width, frame_height):
     return rois_by_name
 
 
-def expand_roi(polygon, expand_ratio=0.15):
+def expand_roi(polygon, expand_ratio=0.30):
     """
     Verilen poligonu KENDI MERKEZINDEN (centroid) disariya dogru,
     YUZDE bazli bir oranla genisletir - PIKSEL bazli sabit bir genisletme
@@ -92,7 +92,7 @@ def expand_roi(polygon, expand_ratio=0.15):
     olcekleniyor, boylece tutarli kalir.
 
     polygon: Nx2 (piksel) koordinat dizisi (load_rois()'un dondurdugu format).
-    expand_ratio: 0.15 = her nokta, merkezden uzakligini %15 ARTIRACAK
+    expand_ratio: 0.30 = her nokta, merkezden uzakligini %30 ARTIRACAK
                   sekilde disari itilir (0.0 = degisiklik yok).
 
     Donus: ayni sekilde Nx2 int32 numpy array (genisletilmis poligon).

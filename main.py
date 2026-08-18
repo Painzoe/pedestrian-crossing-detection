@@ -69,6 +69,7 @@ import torch
 import cv2
 import os
 import argparse
+from collections import defaultdict
 
 import roi_loader
 
@@ -162,6 +163,37 @@ DEFAULT_ID_MEMORY_FRAMES = 90
 # bu tek/iki-kare gurultuyu buyuk olcude eler, ama kisa sureli gercekten
 # kamerada kalan bir yayayi elemeyecek kadar toleransli.
 DEFAULT_ROI_MIN_CONSECUTIVE_FRAMES = 5
+
+# PARCA BIRLESTIRME (--merge-fragments, opsiyonel, varsayilan KAPALI) icin
+# esikler - bkz. merge_fragmented_tracks() docstring'i. Kalabalik/uzun-kalis
+# sahnelerde (orn. part1'deki turistik crosswalk, fotograf cekilirken
+# defalarca tikanip yeni ID alan insanlar) reconcile_stranded_new_tracks
+# tek-tur oldugu icin kurtaramadigi parcalanmalari, video BITTIKTEN SONRA
+# TUM trajectory'yi gorerek duzeltmeye calisir.
+#
+# max_gap_seconds: DEFAULT_ID_MEMORY_FRAMES (90 kare =~3sn) ile AYNI
+# pencere - teshiste (bkz. main.py'nin gecmisi) "yeni ID" olaylarinin
+# sadece %4'u gercekten hafiza suresi doldugu icin olustu, geri kalani
+# (parcalanma dahil) zaten bu pencerenin ICINDE gerceklesiyor.
+DEFAULT_FRAGMENT_MERGE_MAX_GAP_SECONDS = 3.0
+# max_dist_factor: bir onceki track'in son hiziyla EKSTRAPOLE edilen
+# konumun, sonraki track'in gercek baslangic konumundan ne kadar
+# UZAKLASABILECEGI - kutu capinin (avg_diag) kac kati kadar tolerans
+# birakiliyor. Olcum gurultusunu (Kalman tahmini kusursuz degil) kapsayacak
+# ama TAMAMEN FARKLI bir konumdaki birini kapsamayacak kadar siki.
+FRAGMENT_MERGE_MAX_DIST_FACTOR = 1.5
+# min_speed_for_direction: hiz vektoru bu esigin (piksel/kare) ALTINDAYSA
+# yon karsilastirmasi ATLANIYOR - neredeyse durgun (fotograf cekerken sabit
+# duran) biri icin "yon" olcumu gurultuden ibaret olur, boyle durumlarda
+# SADECE mesafe testine guveniliyor.
+FRAGMENT_MERGE_MIN_SPEED_FOR_DIRECTION = 2.0
+# min_direction_cos_sim: cikis hizi ile giris hizi arasindaki kosinus
+# benzerligi (1.0 = ayni yon, 0.0 = dik, -1.0 = ters yon) bu esigin
+# ALTINDAYSA birlestirme REDDEDILIYOR - art arda gecen IKI FARKLI insanin
+# (biri girerken digeri ayni noktadan cikarken) yanlislikla birlesmesini
+# onlemek icin ana savunma hatti budur (sadece mesafeye guvenmek yeterli
+# degil, bkz. konusma).
+FRAGMENT_MERGE_MIN_DIRECTION_COS_SIM = 0.3
 
 IOU_MATCH_THRESHOLD = 0.3  # tracker.py'deki AYNI deger - bir tespiti bir track'e baglamak icin gereken min ortusme
 
@@ -332,6 +364,141 @@ def build_held_detections(tracker, hold_frames):
                           tracker_id=np.array(held_ids, dtype=int))
 
 
+def merge_fragmented_tracks(track_positions, candidate_ids, fps,
+                             max_gap_seconds=DEFAULT_FRAGMENT_MERGE_MAX_GAP_SECONDS,
+                             max_dist_factor=FRAGMENT_MERGE_MAX_DIST_FACTOR,
+                             min_speed_for_direction=FRAGMENT_MERGE_MIN_SPEED_FOR_DIRECTION,
+                             min_direction_cos_sim=FRAGMENT_MERGE_MIN_DIRECTION_COS_SIM):
+    """
+    OFFLINE PARCA BIRLESTIRME - reconcile_stranded_new_tracks()'in (Hungarian
+    ikinci-tur duzeltmesi) tek-turlu/gerceklestigi anda karar verdigi icin
+    KURTARAMADIGI parcalanmalari (ozellikle kalabalik/uzun-kalis sahnelerde,
+    3+ kisilik rekabet zincirlerinde) video BITTIKTEN SONRA, ID'nin TUM
+    trajectory'sini gorerek duzeltmeye calisir - bkz. konusma gecmisi (part1
+    turistik crosswalk'ta fotograf cekilirken tekrar tekrar sayi artmasi).
+
+    FIKIR: iki farkli track_id, A (once biten) ve B (sonra baslayan), su
+    UCU sart birden saglaniyorsa AYNI fiziksel kisinin iki parcasi sayilir:
+      1) ZAMAN: B'nin ilk goruldugu kare ile A'nin son goruldugu kare
+         arasindaki fark <= max_gap_seconds (bkz. DEFAULT_FRAGMENT_MERGE_
+         MAX_GAP_SECONDS ustundeki not - id-memory-frames penceresiyle ayni).
+      2) KONUM: A'nin kaybolmadan onceki SON HIZIYLA o sureye EKSTRAPOLE
+         edilen konum, B'nin GERCEK ilk konumuna yakin (kutu capina
+         goreceli bir esik icinde) - SADECE "yakinlik" degil, "hareketin
+         DEVAMI" test ediliyor.
+      3) YON: (hizlar yeterince yuksekse) A'nin cikis yonuyle B'nin giris
+         yonu tutarli.
+
+    NEDEN SADECE MESAFE YETERSIZ: art arda gecen IKI FARKLI insan da (biri
+    cikarken digeri ayni noktadan girerken - crosswalk giris/cikislari
+    ORTAK oldugu icin bu SIK olur) zaman+mesafe testini tek basina
+    gecebilir, bu da YANLISLIKLA iki farkli kisiyi birlestirip EKSIK
+    sayima yol acar. Hiz/yon ekstrapolasyonu (madde 2-3) bu riski
+    azaltan ana savunma: rastgele yakin duran iki farkli insanin hareket
+    vektorlerinin TESADUFEN de tutarli olma ihtimali, sadece "yakin olmak"
+    tan cok daha dusuktur.
+
+    track_positions: {track_id: [(frame_idx, foot_x, foot_y, box_diag), ...]}
+                      SADECE taze/fresh tespitler (held/Kalman-tahmini DEGIL
+                      - main.py ana dongusunden, bkz. cagiran kod).
+    candidate_ids: SADECE birlestirme icin degerlendirilecek ID kumesi -
+                   ROI gurultu filtresini (--roi-min-frames) GECMIS ID'ler
+                   verilmeli; gurultu track'lerini birlestirmeye calismanin
+                   anlami yok (zaten sayima girmiyorlar).
+
+    Donus: {orijinal_id: canonical_id} sozlugu - birlesmeyen ID'ler kendi
+    kendine esler (canonical_id == orijinal_id).
+    """
+    tracks = {}
+    for tid in candidate_ids:
+        points = sorted(track_positions.get(tid, []))
+        if not points:
+            continue
+        entry = points[0]
+        exit_ = points[-1]
+        entry_ref = points[min(4, len(points) - 1)]
+        exit_ref = points[max(0, len(points) - 5)]
+        avg_diag = sum(p[3] for p in points) / len(points)
+
+        entry_dt = entry_ref[0] - entry[0]
+        entry_vel = (
+            ((entry_ref[1] - entry[1]) / entry_dt, (entry_ref[2] - entry[2]) / entry_dt)
+            if entry_dt > 0 else (0.0, 0.0)
+        )
+        exit_dt = exit_[0] - exit_ref[0]
+        exit_vel = (
+            ((exit_[1] - exit_ref[1]) / exit_dt, (exit_[2] - exit_ref[2]) / exit_dt)
+            if exit_dt > 0 else (0.0, 0.0)
+        )
+
+        tracks[tid] = {
+            "entry_frame": entry[0], "entry_pos": (entry[1], entry[2]), "entry_vel": entry_vel,
+            "exit_frame": exit_[0], "exit_pos": (exit_[1], exit_[2]), "exit_vel": exit_vel,
+            "avg_diag": max(avg_diag, 1.0),
+        }
+
+    max_gap_frames = max_gap_seconds * fps
+
+    # ADAY CIFTLER: B'nin girisi A'nin cikisindan SONRA ve pencere icinde
+    # olan, mesafe+yon testini gecen (A, B) ciftleri - mesafeye gore
+    # (en yakin/en guvenilir once) SIRALANIYOR.
+    candidates = []
+    for id_a, ta in tracks.items():
+        for id_b, tb in tracks.items():
+            if id_a == id_b:
+                continue
+            gap = tb["entry_frame"] - ta["exit_frame"]
+            if not (0 < gap <= max_gap_frames):
+                continue
+
+            pred_x = ta["exit_pos"][0] + ta["exit_vel"][0] * gap
+            pred_y = ta["exit_pos"][1] + ta["exit_vel"][1] * gap
+            dist = ((pred_x - tb["entry_pos"][0]) ** 2 + (pred_y - tb["entry_pos"][1]) ** 2) ** 0.5
+            scale = (ta["avg_diag"] + tb["avg_diag"]) / 2.0
+            if dist > max_dist_factor * scale:
+                continue
+
+            speed_a = (ta["exit_vel"][0] ** 2 + ta["exit_vel"][1] ** 2) ** 0.5
+            speed_b = (tb["entry_vel"][0] ** 2 + tb["entry_vel"][1] ** 2) ** 0.5
+            cos_sim = None
+            if speed_a >= min_speed_for_direction and speed_b >= min_speed_for_direction:
+                cos_sim = (
+                    (ta["exit_vel"][0] * tb["entry_vel"][0] + ta["exit_vel"][1] * tb["entry_vel"][1])
+                    / (speed_a * speed_b)
+                )
+                if cos_sim < min_direction_cos_sim:
+                    continue
+
+            candidates.append((dist, id_a, id_b, gap, cos_sim))
+
+    # ACGOZLU (greedy) en-iyi-once eslesme: bir track'in CIKISI en fazla BIR
+    # sonraki track'e "devam" olarak baglanabilir, bir track'in GIRISI de en
+    # fazla BIR onceki track'ten "devam" alabilir (bir kisi ayni anda ikiye
+    # BOLUNEMEZ, iki kisi TEK kisiye BIRLESEMEZ).
+    candidates.sort(key=lambda c: c[0])
+    exit_used = set()
+    entry_used = set()
+    parent = {tid: tid for tid in tracks}
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    accepted_pairs = []
+    for dist, id_a, id_b, gap, cos_sim in candidates:
+        if id_a in exit_used or id_b in entry_used:
+            continue
+        exit_used.add(id_a)
+        entry_used.add(id_b)
+        parent[id_b] = find(id_a)
+        accepted_pairs.append({"from": id_a, "to": id_b, "gap_frames": gap,
+                                "dist_px": dist, "direction_cos_sim": cos_sim})
+
+    return {tid: find(tid) for tid in tracks}, accepted_pairs
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Birlesik tespit+takip pipeline'i: secilen modelle kisi "
@@ -388,6 +555,13 @@ def parse_args():
                               "degil) tespit sayisi - kisa omurlu/gurultu track'lerin sayima "
                               f"karismasini engeller (varsayilan: {DEFAULT_ROI_MIN_CONSECUTIVE_FRAMES}). "
                               "Sadece --roi-json verildiyse etkili.")
+    parser.add_argument("--merge-fragments", action="store_true",
+                         help="ROI sayiminda, ayni kisinin kalabalikta/uzun kalista "
+                              "(bkz. reconcile_stranded_new_tracks) PARCALANMIS (farkli "
+                              "ID almis) track'lerini, video bittikten sonra hareket "
+                              "yonu/hizi ekstrapolasyonuyla TEK kisi olarak birlestirir "
+                              "(bkz. merge_fragmented_tracks()). Varsayilan: KAPALI - "
+                              "sadece --roi-json verildiyse etkili.")
     return parser.parse_args()
 
 
@@ -543,6 +717,13 @@ def main():
     consecutive_fresh_streak = {}
     max_consecutive_fresh_streak = {}
 
+    # --merge-fragments icin: her ID'nin SADECE taze (held/Kalman-tahmini
+    # DEGIL) tespitlerinin (kare, ayak_x, ayak_y, kutu_capi) gecmisi - bkz.
+    # merge_fragmented_tracks(). ROI verilmese bile ucretsiz toplaniyor
+    # (hesaplama maliyeti ihmal edilebilir), sadece rapor asamasinda
+    # --roi-json + --merge-fragments ikisi de verilmisse kullaniliyor.
+    track_positions = defaultdict(list)
+
     # frame_rate'i VIDEONUN GERCEK fps'i ile veriyoruz - eski tracker.py
     # bunu hic vermiyordu (sabit 30 varsayiliyordu), farkli fps'li bir
     # videoda hem box-hold hem ID hafizasi suresi (kare cinsinden) yanlis
@@ -605,6 +786,12 @@ def main():
         # daha once baslamis serilerin HEPSI 0'a sifirlaniyor. En uzun
         # ulasilan seri ayrica ayri bir sozlukte tutuluyor (rapor
         # asamasinda filtre icin).
+        for tid, box in zip(fresh_ids, fresh_detections.xyxy):
+            foot_x = (box[0] + box[2]) / 2.0
+            foot_y = box[3]
+            box_diag = ((box[2] - box[0]) ** 2 + (box[3] - box[1]) ** 2) ** 0.5
+            track_positions[tid].append((frame_index, foot_x, foot_y, box_diag))
+
         fresh_ids_this_frame = set(fresh_ids)
         for tid in fresh_ids_this_frame:
             consecutive_fresh_streak[tid] = consecutive_fresh_streak.get(tid, 0) + 1
@@ -691,12 +878,32 @@ def main():
             for roi_name, ids in roi_counted_ids.items()
         }
 
-        # TOPLAM: butun ROI'lerdeki essiz (VE FILTRELENMIS) ID'lerin
-        # BIRLESIMI (union) - bir kisi birden fazla ROI'de gorulsse (orn.
-        # iki crosswalk'tan da gecmisse) TOPLAM'da SADECE 1 kere sayiliyor,
-        # ciunku soru "kac FARKLI kisi gecti" (ROI'lerin toplami degil).
+        # --merge-fragments: N=5 gurultu filtresini GECMIS (yani zaten
+        # "gercek" sayilan) ID'ler arasinda, hiz/yon ekstrapolasyonuyla
+        # parcalanmis olanlari birlestir - bkz. merge_fragmented_tracks().
+        # Gurultu filtresinden AYRI/SONRAKI bir adim: ikisinin etkisini
+        # raporda karistirmadan ayri ayri gosterebilmek icin
+        # filtered_roi_ids (merge ONCESI) ayrica saklaniyor.
+        merge_map = {}
+        merge_pairs = []
+        merged_roi_ids = filtered_roi_ids
+        if args.merge_fragments:
+            candidate_ids = set()
+            for ids in filtered_roi_ids.values():
+                candidate_ids |= ids
+            merge_map, merge_pairs = merge_fragmented_tracks(track_positions, candidate_ids, fps)
+            merged_roi_ids = {
+                roi_name: {merge_map.get(tid, tid) for tid in ids}
+                for roi_name, ids in filtered_roi_ids.items()
+            }
+
+        # TOPLAM: butun ROI'lerdeki essiz (FILTRELENMIS VE varsa BIRLESTIRILMIS)
+        # ID'lerin BIRLESIMI (union) - bir kisi birden fazla ROI'de gorulsse
+        # (orn. iki crosswalk'tan da gecmisse) TOPLAM'da SADECE 1 kere
+        # sayiliyor, ciunku soru "kac FARKLI kisi gecti" (ROI'lerin toplami
+        # degil).
         all_counted_ids = set()
-        for ids in filtered_roi_ids.values():
+        for ids in merged_roi_ids.values():
             all_counted_ids |= ids
 
         report_lines = [
@@ -706,18 +913,54 @@ def main():
             f"Model: {args.model} ({args.epochs} epoch), conf={conf}",
             f"ROI JSON: {args.roi_json}",
             f"Gurultu filtresi: en az {args.roi_min_frames} ardisik taze kare (--roi-min-frames)",
+            f"Parca birlestirme (--merge-fragments): "
+            f"{'AKTIF (max bosluk: ' + str(DEFAULT_FRAGMENT_MERGE_MAX_GAP_SECONDS) + 'sn)' if args.merge_fragments else 'KAPALI'}",
             "",
         ]
-        for roi_name, ids in filtered_roi_ids.items():
+        for roi_name, ids in merged_roi_ids.items():
             raw_count = len(roi_counted_ids[roi_name])
-            elenen = raw_count - len(ids)
+            n_filtered_count = len(filtered_roi_ids[roi_name])
+            gurultu_elenen = raw_count - n_filtered_count
+            merge_azaltan = n_filtered_count - len(ids)
+            extra = f", parca birlestirmeyle azalan: {merge_azaltan}" if args.merge_fragments else ""
             report_lines.append(
                 f"{roi_name}: {len(ids)} essiz kisi (ID'ler: {sorted(ids)}) "
-                f"[filtre oncesi ham sayi: {raw_count}, elenen gurultu: {elenen}]"
+                f"[filtre oncesi ham sayi: {raw_count}, elenen gurultu: {gurultu_elenen}{extra}]"
             )
         report_lines.append("-" * 50)
         report_lines.append(f"TOPLAM (en az bir ROI'de sayilan essiz kisi, filtreli): {len(all_counted_ids)}")
         report_lines.append("(Not: bir kisi birden fazla ROI'de gorunmusse TOPLAM'da sadece 1 kere sayilir)")
+
+        if args.merge_fragments:
+            groups = defaultdict(list)
+            for tid, root in merge_map.items():
+                groups[root].append(tid)
+            merged_groups = {root: sorted(members) for root, members in groups.items() if len(members) > 1}
+            if merged_groups:
+                report_lines.append("-" * 50)
+                report_lines.append("Birlestirilen ID gruplari (ayni fiziksel kisi sayildi):")
+                for root, members in sorted(merged_groups.items()):
+                    report_lines.append(f"  {members} -> tek kisi (temsilci ID: {root})")
+
+                # DENETIM (audit) izi - HER ikili birlestirme kararinin
+                # dayandigi olcumleri gosteriyor (bkz. merge_fragmented_tracks
+                # docstring'i): gap_frames (bosluk), dist_px (ekstrapole
+                # edilen konumla gercek konum arasi fark), direction_cos_sim
+                # (yon tutarliligi, None = hiz cok dusuk oldugu icin yon
+                # kontrolu atlandi). Supheli bir birlestirmeyi (orn. gercekte
+                # iki farkli insan) bu satirlara bakarak gozden gecirmek
+                # icin - "neden birlesti" sorusunun cevabi burada.
+                report_lines.append("")
+                report_lines.append("Birlestirme denetim izi (her ikili karar):")
+                for pair in merge_pairs:
+                    cos_txt = (f"{pair['direction_cos_sim']:.2f}" if pair["direction_cos_sim"] is not None
+                                else "N/A (dusuk hiz, yon kontrolu atlandi)")
+                    report_lines.append(
+                        f"  {pair['from']} -> {pair['to']}: bosluk={pair['gap_frames']:.0f} kare "
+                        f"({pair['gap_frames'] / fps:.2f}sn), tahmin-gercek fark={pair['dist_px']:.1f}px, "
+                        f"yon benzerligi={cos_txt}"
+                    )
+
         report_text = "\n".join(report_lines)
 
         print("\n" + report_text)

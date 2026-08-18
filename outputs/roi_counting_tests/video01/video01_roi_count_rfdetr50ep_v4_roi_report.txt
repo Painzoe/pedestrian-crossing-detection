@@ -1,0 +1,11 @@
+ROI SAYIM RAPORU
+==================================================
+Video: data/raw_videos/video01.mp4
+Model: rfdetr (50 epoch), conf=0.42
+ROI JSON: rois/video01_rois(3).json
+Gurultu filtresi: en az 5 ardisik taze kare (--roi-min-frames)
+
+crosswalk_1: 13 essiz kisi (ID'ler: [18, 19, 22, 23, 25, 27, 29, 49, 50, 51, 68, 92, 100]) [filtre oncesi ham sayi: 31, elenen gurultu: 18]
+--------------------------------------------------
+TOPLAM (en az bir ROI'de sayilan essiz kisi, filtreli): 13
+(Not: bir kisi birden fazla ROI'de gorunmusse TOPLAM'da sadece 1 kere sayilir)

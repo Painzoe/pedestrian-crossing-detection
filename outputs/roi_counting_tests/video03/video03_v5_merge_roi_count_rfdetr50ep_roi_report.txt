@@ -1,0 +1,21 @@
+ROI SAYIM RAPORU
+==================================================
+Video: data/raw_videos/video03.mp4
+Model: rfdetr (50 epoch), conf=0.42
+ROI JSON: rois/video03_rois(1).json
+Gurultu filtresi: en az 5 ardisik taze kare (--roi-min-frames)
+Parca birlestirme (--merge-fragments): AKTIF (max bosluk: 3.0sn)
+
+crosswalk_1: 9 essiz kisi (ID'ler: [16, 28, 29, 31, 61, 62, 67, 83, 84]) [filtre oncesi ham sayi: 20, elenen gurultu: 10, parca birlestirmeyle azalan: 1]
+crosswalk_2: 6 essiz kisi (ID'ler: [3, 7, 26, 27, 39, 83]) [filtre oncesi ham sayi: 9, elenen gurultu: 3, parca birlestirmeyle azalan: 0]
+--------------------------------------------------
+TOPLAM (en az bir ROI'de sayilan essiz kisi, filtreli): 14
+(Not: bir kisi birden fazla ROI'de gorunmusse TOPLAM'da sadece 1 kere sayilir)
+--------------------------------------------------
+Birlestirilen ID gruplari (ayni fiziksel kisi sayildi):
+  [28, 58] -> tek kisi (temsilci ID: 28)
+  [83, 85] -> tek kisi (temsilci ID: 83)
+
+Birlestirme denetim izi (her ikili karar):
+  28 -> 58: bosluk=19 kare (0.63sn), tahmin-gercek fark=35.1px, yon benzerligi=N/A (dusuk hiz, yon kontrolu atlandi)
+  83 -> 85: bosluk=52 kare (1.74sn), tahmin-gercek fark=89.6px, yon benzerligi=0.98
